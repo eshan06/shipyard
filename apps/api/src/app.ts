@@ -24,6 +24,7 @@ import {
 
 import { registerErrorHandlers } from "./errors.js";
 import { buildLoggerOptions } from "./logger.js";
+import analyticsPlugin from "./plugins/analytics.js";
 import authPlugin from "./plugins/auth.js";
 import prismaPlugin from "./plugins/prisma.js";
 import queuesPlugin from "./plugins/queues.js";
@@ -32,6 +33,7 @@ import swaggerPlugin from "./plugins/swagger.js";
 import { registerRoutes } from "./routes/index.js";
 
 import type { AppConfig } from "./config.js";
+import type { AnalyticsSink } from "./lib/analytics.js";
 import type { AppQueues } from "./types.js";
 import type { PrismaClient } from "@shipyard/db";
 import type { FastifyInstance } from "fastify";
@@ -53,6 +55,8 @@ export interface BuildAppOptions {
   redisSub?: Redis;
   /** Injected queues implementation (defaults to real BullMQ queues). */
   queues?: AppQueues;
+  /** Injected analytics sink (defaults to the `ANALYTICS_DRIVER`-configured one). */
+  analytics?: AnalyticsSink;
 }
 
 /**
@@ -103,6 +107,7 @@ export async function buildApp(
     redisSub: opts.redisSub,
   });
   await app.register(queuesPlugin, { queues: opts.queues });
+  await app.register(analyticsPlugin, { analytics: opts.analytics });
   await app.register(authPlugin);
 
   await app.register(rateLimit, {

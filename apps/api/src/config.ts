@@ -97,7 +97,53 @@ const ConfigSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(200),
   /** Rate-limit window (a `@fastify/rate-limit` duration string or ms number). */
   RATE_LIMIT_WINDOW: z.string().min(1).default("1 minute"),
-});
+
+  // ── Product analytics / telemetry ──────────────────────────────────────────
+  /**
+   * Which sink receives product-analytics events (those posted to
+   * `POST /api/v1/telemetry` and any server-side `app.analytics.track(...)`).
+   * - `log` (default): emit durable, structured pino events — a real,
+   *   dependency-free sink that ships to whatever collector consumes the API's
+   *   logs. Nothing leaves the cluster.
+   * - `http`: POST each event as JSON to {@link ANALYTICS_HTTP_ENDPOINT} (a
+   *   warehouse/collector of your choice).
+   * - `posthog`: send events to PostHog's capture API.
+   * Mirrors the worker's `DEPLOY_DRIVER` driver-toggle convention.
+   */
+  ANALYTICS_DRIVER: z.enum(["log", "http", "posthog"]).default("log"),
+  /** Collector endpoint for the `http` driver (required when driver=http). */
+  ANALYTICS_HTTP_ENDPOINT: z.string().url().optional(),
+  /**
+   * Optional `Authorization` header value the `http` driver sends (e.g.
+   * `"Bearer <token>"`). Omit for unauthenticated collectors.
+   */
+  ANALYTICS_HTTP_AUTH_HEADER: z.string().optional(),
+  /** PostHog instance host for the `posthog` driver. */
+  ANALYTICS_POSTHOG_HOST: z
+    .string()
+    .url()
+    .default("https://us.i.posthog.com"),
+  /** PostHog project API key (required when driver=posthog). */
+  ANALYTICS_POSTHOG_API_KEY: z.string().optional(),
+})
+  .superRefine((cfg, ctx) => {
+    // Driver-specific requirements: fail fast at startup, not at first event.
+    if (cfg.ANALYTICS_DRIVER === "http" && !cfg.ANALYTICS_HTTP_ENDPOINT) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["ANALYTICS_HTTP_ENDPOINT"],
+        message: "ANALYTICS_HTTP_ENDPOINT is required when ANALYTICS_DRIVER=http",
+      });
+    }
+    if (cfg.ANALYTICS_DRIVER === "posthog" && !cfg.ANALYTICS_POSTHOG_API_KEY) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["ANALYTICS_POSTHOG_API_KEY"],
+        message:
+          "ANALYTICS_POSTHOG_API_KEY is required when ANALYTICS_DRIVER=posthog",
+      });
+    }
+  });
 
 /**
  * The validated, typed application configuration. This is the only shape the

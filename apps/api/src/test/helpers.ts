@@ -14,6 +14,7 @@ import { vi } from "vitest";
 import { buildApp } from "../app.js";
 
 import type { AppConfig } from "../config.js";
+import type { AnalyticsSink } from "../lib/analytics.js";
 import type { AppQueues } from "../types.js";
 import type { PrismaClient } from "@shipyard/db";
 import type Redis from "ioredis";
@@ -38,6 +39,11 @@ export const TEST_CONFIG: AppConfig = Object.freeze({
   GITHUB_WEBHOOK_SECRET: undefined,
   RATE_LIMIT_MAX: 1000,
   RATE_LIMIT_WINDOW: "1 minute",
+  ANALYTICS_DRIVER: "log",
+  ANALYTICS_HTTP_ENDPOINT: undefined,
+  ANALYTICS_HTTP_AUTH_HEADER: undefined,
+  ANALYTICS_POSTHOG_HOST: "https://us.i.posthog.com",
+  ANALYTICS_POSTHOG_API_KEY: undefined,
 } satisfies AppConfig);
 
 /** A deeply-partial Prisma mock; individual tests fill in the methods they use. */
@@ -76,6 +82,8 @@ export interface BuildTestAppOptions {
   prisma?: PrismaMock;
   /** Config overrides merged over {@link TEST_CONFIG}. */
   config?: Partial<AppConfig>;
+  /** An injected analytics sink (e.g. a recording fake for assertions). */
+  analytics?: AnalyticsSink;
 }
 
 /**
@@ -100,5 +108,6 @@ export async function buildTestApp(options: BuildTestAppOptions = {}) {
     redis,
     redisSub,
     queues: fakeQueues(),
+    analytics: options.analytics,
   });
 }

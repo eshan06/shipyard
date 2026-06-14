@@ -33,6 +33,7 @@ import { seedsRoutes } from "./seeds.js";
 import { servicesRoutes } from "./services.js";
 import { streamsRoutes } from "./streams.js";
 import { teamsRoutes } from "./teams.js";
+import { telemetryRoutes } from "./telemetry.js";
 import { tokensRoutes } from "./tokens.js";
 import { webhooksRoutes } from "./webhooks.js";
 
@@ -74,6 +75,7 @@ export async function registerRoutes(app: FastifyInstance): Promise<void> {
         await secure.register(auditRoutes);
         await secure.register(tokensRoutes);
         await secure.register(notificationsRoutes);
+        await secure.register(telemetryRoutes);
         await secure.register(streamsRoutes);
       });
     },

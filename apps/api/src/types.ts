@@ -10,6 +10,7 @@
  */
 
 import type { AppConfig } from "./config.js";
+import type { AnalyticsSink } from "./lib/analytics.js";
 import type { DeployJob, DestroyJob } from "@shipyard/core";
 import type { PrismaClient } from "@shipyard/db";
 import type { Queue } from "bullmq";
@@ -76,6 +77,8 @@ declare module "fastify" {
     readonly redisSub: Redis;
     /** Producer queues + validated enqueue helpers. */
     readonly queues: AppQueues;
+    /** Product-analytics sink (`POST /telemetry` + server-side events). */
+    readonly analytics: AnalyticsSink;
     /**
      * Sign a session JWT for a user (used by auth routes after login).
      * @param userId - The `User.id` to embed in the session.

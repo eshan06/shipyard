@@ -15,6 +15,7 @@ import useSWR, { type SWRConfiguration, type SWRResponse } from "swr";
 import { api, ApiError } from "./api";
 
 import type {
+  ApiToken,
   CostSummary,
   Deployment,
   EnvVar,
@@ -208,6 +209,28 @@ export function useCostSummary(): SWRResponse<CostSummary, ApiError> {
   return useSWR<CostSummary, ApiError>(
     "costs-summary",
     () => api.costsSummary(),
+    baseConfig,
+  );
+}
+
+/** A team's API tokens. Pass `null` to skip fetching (e.g. team unknown). */
+export function useTeamTokens(
+  teamId: string | null,
+): SWRResponse<ListResponse<ApiToken>, ApiError> {
+  return useSWR<ListResponse<ApiToken>, ApiError>(
+    teamId ? ["team-tokens", teamId] : null,
+    () => api.listTeamTokens(teamId as string),
+    baseConfig,
+  );
+}
+
+/** A project's env vars (secrets masked). Pass `null` to skip fetching. */
+export function useProjectEnv(
+  projectId: string | null,
+): SWRResponse<ListResponse<EnvVar>, ApiError> {
+  return useSWR<ListResponse<EnvVar>, ApiError>(
+    projectId ? ["project-env", projectId] : null,
+    () => api.listProjectEnv(projectId as string),
     baseConfig,
   );
 }

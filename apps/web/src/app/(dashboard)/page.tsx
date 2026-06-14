@@ -12,6 +12,7 @@ import Link from "next/link";
 import * as React from "react";
 
 
+import { OnboardingChecklist } from "@/components/onboarding-checklist";
 import { PageHeader } from "@/components/page-header";
 import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/states";
 import { StatusBadge } from "@/components/status-badge";
@@ -157,6 +158,8 @@ export default function OverviewPage(): React.JSX.Element {
 
   return (
     <div className="space-y-8">
+      <OnboardingChecklist />
+
       <PageHeader
         title="Overview"
         description="A live snapshot of your preview environments and recent activity."

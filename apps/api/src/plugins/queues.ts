@@ -1,0 +1,76 @@
+/**
+ * BullMQ queues plugin: decorates `app.queues` with the `deploy`/`destroy`
+ * producer queues and validated enqueue helpers.
+ *
+ * Payloads are validated against the shared `@shipyard/core` job schemas before
+ * being added (with `DEFAULT_JOB_OPTIONS`) so the API and the worker can never
+ * disagree on a job's wire shape. Queues are closed on server shutdown.
+ *
+ * @module
+ */
+
+import { Queue } from "bullmq";
+import fp from "fastify-plugin";
+
+import {
+  DEFAULT_JOB_OPTIONS,
+  DeployJobSchema,
+  DestroyJobSchema,
+  QUEUE,
+} from "@shipyard/core";
+
+import type { AppQueues } from "../types.js";
+import type { DeployJob, DestroyJob } from "@shipyard/core";
+import type { FastifyInstance } from "fastify";
+
+/** Options for the queues plugin. */
+export interface QueuesPluginOptions {
+  /** An injected queues implementation (tests); otherwise real BullMQ queues. */
+  queues?: AppQueues;
+}
+
+/**
+ * Register the BullMQ queues plugin.
+ *
+ * @param app - The Fastify instance.
+ * @param options - Optional injected queues.
+ */
+async function queuesPlugin(
+  app: FastifyInstance,
+  options: QueuesPluginOptions,
+): Promise<void> {
+  if (options.queues) {
+    app.decorate("queues", options.queues);
+    return;
+  }
+
+  // BullMQ shares a single ioredis connection config across its queues. It
+  // requires `maxRetriesPerRequest: null`.
+  const connection = { url: app.config.REDIS_URL, maxRetriesPerRequest: null };
+
+  const deploy = new Queue(QUEUE.deploy, { connection });
+  const destroy = new Queue(QUEUE.destroy, { connection });
+
+  const queues: AppQueues = {
+    deploy,
+    destroy,
+    async enqueueDeploy(payload: DeployJob): Promise<string> {
+      const data = DeployJobSchema.parse(payload);
+      const job = await deploy.add(QUEUE.deploy, data, DEFAULT_JOB_OPTIONS);
+      return String(job.id);
+    },
+    async enqueueDestroy(payload: DestroyJob): Promise<string> {
+      const data = DestroyJobSchema.parse(payload);
+      const job = await destroy.add(QUEUE.destroy, data, DEFAULT_JOB_OPTIONS);
+      return String(job.id);
+    },
+  };
+
+  app.decorate("queues", queues);
+
+  app.addHook("onClose", async () => {
+    await Promise.allSettled([deploy.close(), destroy.close()]);
+  });
+}
+
+export default fp(queuesPlugin, { name: "queues" });

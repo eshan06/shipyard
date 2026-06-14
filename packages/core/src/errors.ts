@@ -17,6 +17,7 @@
  */
 export const ErrorCode = {
   NOT_FOUND: "NOT_FOUND",
+  UNAUTHENTICATED: "UNAUTHENTICATED",
   FORBIDDEN: "FORBIDDEN",
   VALIDATION: "VALIDATION",
   CONFLICT: "CONFLICT",
@@ -121,6 +122,24 @@ export class NotFoundError extends AppError {
         : `${resource} not found: ${identifier}`,
       identifier === undefined ? undefined : { resource, identifier },
     );
+  }
+}
+
+/**
+ * The caller is not authenticated: no valid session cookie or API token was
+ * presented (HTTP 401). Distinct from {@link ForbiddenError}, which means the
+ * caller *is* authenticated but lacks permission.
+ */
+export class UnauthorizedError extends AppError {
+  readonly code = ErrorCode.UNAUTHENTICATED;
+  readonly httpStatus = 401;
+
+  /**
+   * @param message - Reason authentication failed. Defaults to a generic message.
+   * @param details - Optional structured context.
+   */
+  constructor(message = "Authentication required", details?: unknown) {
+    super(message, details);
   }
 }
 

@@ -5,6 +5,15 @@
 > Companion docs: `PROGRESS.md`, `docs/ENGINEERING.md`, `docs/RETURN_HANDOFF.md`,
 > `docs/DEPLOYMENT.md`, `docs/RUNBOOK.md`.
 
+> **CORRECTION (added after resuming at the new path):** moving off OneDrive did
+> NOT fix the filesystem. The new working tree is a virtiofs bind mount that is
+> still symlink-hostile and slow — `pnpm install` here fails with
+> `ERR_PNPM_EPERM symlink`. So sections 2–3 below (expecting a fast normal disk)
+> do not apply inside the sandbox. We now build on a fast-FS mirror at
+> `/home/agent/build/shipyard`; see PROGRESS.md "Build note" and the
+> `build-on-fast-fs-mirror` memory. The `.npmrc` revert in §3 was still done
+> (it's correct for your real machine/CI/Docker, just not for this mount).
+
 ## 0) Why this file exists
 The repo used to live on a OneDrive-backed mount that made `pnpm install` take
 >1h and fail (EACCES on renames; no symlinks). Workaround that session: build on

@@ -4,10 +4,19 @@
 **Last updated:** 2026-06-14 (final wave — review fixes + production hardening)
 
 ## Build note (for resuming agents)
-Build on the fast overlay fs `/home/agent/build` (the OneDrive mount is ~300x
-slower for IO). `cd /home/agent/build` for everything; deliver via
-`bash scripts/sync-to-onedrive.sh`. Run `bash scripts/strip-write-artifacts.sh`
-after write waves. See the `fast-fs-build-location` memory.
+Moving off OneDrive did NOT fix the filesystem: the working tree
+(`C:\Users\toesh\newGithub\shipyard`) is a **virtiofs bind mount** that rejects
+symlinks (pnpm's default linker fails with `ERR_PNPM_EPERM symlink`) and is slow
+for IO. Keep `.git` + source here and **commit here**, but build/verify on the
+fast `overlay` FS mirror at `/home/agent/build/shipyard`:
+- `bash /home/agent/sync.sh`  — rsync canonical → mirror (preserves node_modules/dist/.next/.turbo/generated)
+- `bash /home/agent/gate.sh [typecheck|build|test|all]`  — run gates on the mirror
+- one-time mirror setup: `pnpm install --store-dir /home/agent/.pnpm-store` then `pnpm --filter @shipyard/db generate`
+
+The committed `.npmrc` is intentionally clean (default symlinked linker) — correct
+for real environments (Windows native, CI, Docker); the symlink issue is
+sandbox-virtiofs-only. The old write-glitch (`</content>` trailing artifact) is
+gone. See the `build-on-fast-fs-mirror` memory.
 
 ## Done
 - [x] Phase 0 — repo/monorepo foundation, infra compose, Prisma model, docs

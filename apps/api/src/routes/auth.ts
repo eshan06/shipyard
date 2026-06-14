@@ -29,14 +29,20 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 /** Cookie name holding the OAuth `state` nonce during the round-trip. */
 const OAUTH_STATE_COOKIE = "sy_oauth_state";
 
-/** Minimal shape of the GitHub `/user` response we consume. */
-interface GitHubUser {
-  id: number;
-  login: string;
-  name: string | null;
-  email: string | null;
-  avatar_url: string | null;
-}
+/**
+ * Schema for the subset of the GitHub `/user` response we consume. Validating
+ * (rather than `as`-casting) is security-critical: a non-2xx GitHub response
+ * (e.g. `{ "message": "Bad credentials" }`) has no numeric `id`, and casting it
+ * would coerce `String(undefined)` into the literal `"undefined"` githubId,
+ * collapsing every failed profile fetch onto ONE shared user account.
+ */
+const GitHubUserSchema = z.object({
+  id: z.number().int(),
+  login: z.string().min(1),
+  name: z.string().nullish(),
+  email: z.string().nullish(),
+  avatar_url: z.string().nullish(),
+});
 
 /**
  * Ensure the user has at least one team membership, creating a personal team
@@ -217,6 +223,15 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
         return;
       }
 
+      // A single 400 helper for any failure exchanging the code or fetching the
+      // profile. We never echo GitHub's response body (it can contain the
+      // submitted client_secret in some 422 error shapes).
+      const oauthFailed = (message: string): void => {
+        reply.status(400).send({
+          error: { code: "VALIDATION", message, httpStatus: 400 },
+        });
+      };
+
       // Exchange the code for an access token.
       const tokenRes = await fetch(
         "https://github.com/login/oauth/access_token",
@@ -230,16 +245,16 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
           }),
         },
       );
-      const tokenJson = (await tokenRes.json()) as { access_token?: string };
-      const accessToken = tokenJson.access_token;
+      if (!tokenRes.ok) {
+        oauthFailed("Failed to exchange GitHub authorization code");
+        return;
+      }
+      const tokenJson = (await tokenRes
+        .json()
+        .catch(() => null)) as { access_token?: string } | null;
+      const accessToken = tokenJson?.access_token;
       if (!accessToken) {
-        reply.status(400).send({
-          error: {
-            code: "VALIDATION",
-            message: "Failed to obtain GitHub access token",
-            httpStatus: 400,
-          },
-        });
+        oauthFailed("Failed to obtain GitHub access token");
         return;
       }
 
@@ -251,27 +266,43 @@ export const authRoutes: FastifyPluginAsyncZod = async (app) => {
           "User-Agent": "shipyard",
         },
       });
-      const gh = (await userRes.json()) as GitHubUser;
+      if (!userRes.ok) {
+        oauthFailed("Failed to fetch GitHub profile");
+        return;
+      }
+      // Validate the payload: a non-2xx/error body has no numeric id, and we
+      // must NOT coerce that into a `githubId: "undefined"` account collision.
+      const ghParsed = GitHubUserSchema.safeParse(
+        await userRes.json().catch(() => null),
+      );
+      if (!ghParsed.success) {
+        oauthFailed("GitHub profile response was invalid");
+        return;
+      }
+      const gh = ghParsed.data;
       const email = gh.email ?? `${gh.login}@users.noreply.github.com`;
+
+      const name = gh.name ?? null;
+      const avatarUrl = gh.avatar_url ?? null;
 
       // Upsert the user keyed on the stable GitHub id.
       const user = await app.prisma.user.upsert({
         where: { githubId: String(gh.id) },
         create: {
           email,
-          name: gh.name,
-          avatarUrl: gh.avatar_url,
+          name,
+          avatarUrl,
           githubId: String(gh.id),
           githubLogin: gh.login,
         },
         update: {
-          name: gh.name,
-          avatarUrl: gh.avatar_url,
+          name,
+          avatarUrl,
           githubLogin: gh.login,
         },
       });
 
-      await ensureTeamFor(app, user.id, gh.name ?? gh.login);
+      await ensureTeamFor(app, user.id, name ?? gh.login);
 
       const session = await app.signSession(user.id);
       setSessionCookie(app, reply, session);

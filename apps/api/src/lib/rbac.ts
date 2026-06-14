@@ -66,6 +66,20 @@ export async function requireTeamRole(
     throw new UnauthorizedError();
   }
 
+  // API tokens are team-scoped credentials: a token minted under team A must
+  // never act on a different team, even if the minting user is a member there.
+  // Enforce the token's bound team before falling through to the membership
+  // check (which would otherwise authorize on the *user's* role anywhere).
+  if (
+    request.auth.kind === "token" &&
+    request.auth.teamId !== undefined &&
+    request.auth.teamId !== teamId
+  ) {
+    throw new ForbiddenError(
+      "This API token is scoped to a different team",
+    );
+  }
+
   const membership = await app.prisma.membership.findUnique({
     where: { userId_teamId: { userId: request.auth.userId, teamId } },
     select: { role: true },

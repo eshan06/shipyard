@@ -140,7 +140,14 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
     if (raw) {
       const token = await app.prisma.apiToken.findUnique({
         where: { hashedToken: hashToken(raw) },
-        select: { id: true, userId: true, revokedAt: true, expiresAt: true },
+        select: {
+          id: true,
+          userId: true,
+          teamId: true,
+          scopes: true,
+          revokedAt: true,
+          expiresAt: true,
+        },
       });
       const now = new Date();
       const valid =
@@ -153,6 +160,10 @@ async function authPlugin(app: FastifyInstance): Promise<void> {
           userId: token.userId,
           kind: "token",
           tokenId: token.id,
+          // API tokens are bound to their owning team; carry it so RBAC can
+          // confine the token to that team (see lib/rbac.requireTeamRole).
+          teamId: token.teamId,
+          scopes: token.scopes,
         };
         // Best-effort last-used bookkeeping; never block the request on it.
         void app.prisma.apiToken

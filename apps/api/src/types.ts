@@ -27,6 +27,17 @@ export interface AuthPrincipal {
   readonly kind: "session" | "token";
   /** The `ApiToken.id` when `kind === "token"`. */
   readonly tokenId?: string;
+  /**
+   * The `ApiToken.teamId` the token is bound to (only set when
+   * `kind === "token"`). API tokens are team-scoped credentials, so RBAC must
+   * confine a token to operating on this team alone.
+   */
+  readonly teamId?: string;
+  /**
+   * The `ApiToken.scopes` granted to the token (only set when
+   * `kind === "token"`). Carried for downstream scope-aware checks.
+   */
+  readonly scopes?: readonly string[];
 }
 
 /**

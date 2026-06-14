@@ -36,9 +36,15 @@ export interface PaginateOptions {
   where?: unknown;
   /**
    * Optional override for the `orderBy`. Defaults to `createdAt` then `id` in
-   * `order` direction (a stable total order suitable for cursoring).
+   * `order` direction (a stable total order suitable for cursoring). Models
+   * without a `createdAt` column (e.g. `Deployment`, `CostRecord`) MUST supply
+   * their own ordering field here.
    */
   orderBy?: unknown;
+  /** Optional Prisma `include` to project relations onto each row. */
+  include?: unknown;
+  /** Optional Prisma `select` to shape each row. Mutually exclusive with `include`. */
+  select?: unknown;
 }
 
 /**
@@ -63,10 +69,12 @@ export async function paginate<TRow extends { id: string }>(
   delegate: PaginatableDelegate<TRow>,
   options: PaginateOptions,
 ): Promise<Page<TRow>> {
-  const { cursor, limit, order, where, orderBy } = options;
+  const { cursor, limit, order, where, orderBy, include, select } = options;
 
   const rows = await delegate.findMany({
     ...(where === undefined ? {} : { where }),
+    ...(include === undefined ? {} : { include }),
+    ...(select === undefined ? {} : { select }),
     orderBy: orderBy ?? [{ createdAt: order }, { id: order }],
     take: limit + 1,
     // When a cursor is supplied, skip the cursor row itself so paging is

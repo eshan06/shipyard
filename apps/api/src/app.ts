@@ -89,14 +89,14 @@ export async function buildApp(
     credentials: true,
   });
   await app.register(cookie, { secret: config.SESSION_SECRET });
-  await app.register(rateLimit, {
-    max: config.RATE_LIMIT_MAX,
-    timeWindow: config.RATE_LIMIT_WINDOW,
-    // Rate-limit per API token when present, otherwise per client IP.
-    keyGenerator: (request) => request.auth?.tokenId ?? request.ip,
-  });
 
   // ── Platform plugins ──────────────────────────────────────────────────────
+  // Register prisma/redis/queues/auth BEFORE the rate-limiter. The auth plugin
+  // populates `request.auth` in an onRequest hook, and @fastify/rate-limit also
+  // runs its check in an onRequest hook; hooks fire in registration order, so
+  // auth must register first for the rate-limit keyGenerator to see the
+  // resolved principal (otherwise per-token limiting silently degrades to
+  // per-IP for every authenticated caller).
   await app.register(prismaPlugin, { prisma: opts.prisma });
   await app.register(redisPlugin, {
     redis: opts.redis,
@@ -104,6 +104,15 @@ export async function buildApp(
   });
   await app.register(queuesPlugin, { queues: opts.queues });
   await app.register(authPlugin);
+
+  await app.register(rateLimit, {
+    max: config.RATE_LIMIT_MAX,
+    timeWindow: config.RATE_LIMIT_WINDOW,
+    // Rate-limit per API token when present, otherwise per client IP. Relies on
+    // the auth plugin (registered above) having already set `request.auth`.
+    keyGenerator: (request) => request.auth?.tokenId ?? request.ip,
+  });
+
   await app.register(swaggerPlugin);
 
   // ── Error handling + routes ───────────────────────────────────────────────

@@ -51,6 +51,7 @@ function fakeRedis(): Redis {
     ping: vi.fn(async () => "PONG"),
     on: vi.fn(),
     off: vi.fn(),
+    setMaxListeners: vi.fn(),
     subscribe: vi.fn(async () => 1),
     unsubscribe: vi.fn(async () => 1),
     duplicate: vi.fn(),

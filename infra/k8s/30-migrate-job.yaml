@@ -1,0 +1,49 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Database migration Job — runs `prisma migrate deploy` once and exits.
+#
+# Run this BEFORE rolling out api/worker on a fresh deploy and on every release
+# that ships new migrations:
+#
+#   kubectl apply -f infra/k8s/30-migrate-job.yaml
+#   kubectl -n shipyard wait --for=condition=complete job/shipyard-migrate --timeout=300s
+#
+# It reuses the API image (which contains the Prisma schema, generated client and
+# the prisma CLI in node_modules). Bump the job name (or delete the old Job)
+# between releases since a completed Job is immutable. CI/CD typically templates
+# the name with the release tag, or runs it as a Helm/ArgoCD pre-sync hook.
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: shipyard-migrate
+  namespace: shipyard
+  labels:
+    app.kubernetes.io/part-of: shipyard
+    app.kubernetes.io/component: migrate
+spec:
+  backoffLimit: 3
+  # Reap the Job 1h after completion (requires the TTL controller, default on).
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: shipyard
+        app.kubernetes.io/component: migrate
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          # Replace OWNER + tag with your registry/image (pin to the release tag).
+          image: ghcr.io/OWNER/shipyard-api:latest
+          command:
+            ["node_modules/.bin/prisma", "migrate", "deploy", "--schema", "packages/db/prisma/schema.prisma"]
+          envFrom:
+            - secretRef:
+                name: shipyard-secrets
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "500m"
+              memory: "512Mi"

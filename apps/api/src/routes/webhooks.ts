@@ -373,6 +373,7 @@ async function processPullRequest(
   // ── Close / merge: mark state + tear down previews ─────────────────────────
   if (action === "closed") {
     const state = pr.merged ? "MERGED" : "CLOSED";
+    const closedAt = new Date();
     const record = await app.prisma.pullRequest.upsert({
       where: { projectId_number: { projectId: project.id, number: pr.number } },
       create: {
@@ -387,15 +388,28 @@ async function processPullRequest(
         url: pr.html_url,
         labels,
         state,
+        closedAt,
       },
       update: {
         title: pr.title,
         headSha: pr.head.sha,
         labels,
         state,
+        // NB: `closedAt` is intentionally NOT updated here — see below. We stamp
+        // it once on the first close so a redelivered "closed" event (or a later
+        // benign row mutation) cannot reset the destroy-TTL clock.
       },
       include: { previews: true },
     });
+
+    // Anchor the destroy TTL on the first close/merge instant only.
+    if (record.closedAt === null) {
+      await app.prisma.pullRequest.update({
+        where: { id: record.id },
+        data: { closedAt },
+      });
+      record.closedAt = closedAt;
+    }
 
     const live = record.previews.filter(
       (p) => p.status !== "DESTROYED" && p.status !== "DESTROYING",

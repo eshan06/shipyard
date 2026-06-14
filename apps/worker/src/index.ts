@@ -108,26 +108,55 @@ async function main(): Promise<void> {
     "shipyard worker ready",
   );
 
+  // Safety net: a floating promise rejection (or a truly uncaught error)
+  // anywhere in the pipeline must not silently crash the worker and drop every
+  // in-flight job. Log it; durable writes are already best-effort (see events.ts).
+  process.on("unhandledRejection", (reason) => {
+    logger.error({ err: reason }, "unhandled promise rejection");
+  });
+  process.on("uncaughtException", (err) => {
+    logger.error({ err }, "uncaught exception");
+  });
+
+  /** Force-exit budget so a hung close() cannot wedge the process forever. */
+  const SHUTDOWN_TIMEOUT_MS = 30_000;
+
   let shuttingDown = false;
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, "shutting down shipyard worker");
 
-    await Promise.allSettled([
-      deployWorker.close(),
-      destroyWorker.close(),
-      cleanupWorker.close(),
-      costWorker.close(),
-    ]);
-    await Promise.allSettled([
-      destroyQueue.close(),
-      cleanupQueue.close(),
-      costQueue.close(),
-    ]);
-    await prisma.$disconnect().catch(() => undefined);
-    await closeConnection(connection);
+    const sequence = (async () => {
+      await Promise.allSettled([
+        deployWorker.close(),
+        destroyWorker.close(),
+        cleanupWorker.close(),
+        costWorker.close(),
+      ]);
+      await Promise.allSettled([
+        destroyQueue.close(),
+        cleanupQueue.close(),
+        costQueue.close(),
+      ]);
+      await prisma.$disconnect().catch(() => undefined);
+      await closeConnection(connection);
+    })();
 
+    // Race the orderly shutdown against a hard timeout: if a worker.close()
+    // blocks on an in-flight job that never settles, force-exit rather than
+    // hang until SIGKILL.
+    const timedOut = await Promise.race([
+      sequence.then(() => false),
+      new Promise<boolean>((resolve) =>
+        setTimeout(() => resolve(true), SHUTDOWN_TIMEOUT_MS).unref(),
+      ),
+    ]);
+
+    if (timedOut) {
+      logger.warn({ timeoutMs: SHUTDOWN_TIMEOUT_MS }, "shutdown timed out; forcing exit");
+      process.exit(1);
+    }
     logger.info("shutdown complete");
     process.exit(0);
   };

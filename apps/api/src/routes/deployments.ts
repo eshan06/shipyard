@@ -36,6 +36,7 @@ import {
 import { writeAudit } from "../lib/audit.js";
 import { paginate } from "../lib/pagination.js";
 import {
+  callerTeamScope,
   requireTeamRole,
   teamIdForDeployment,
   teamIdForPreview,
@@ -257,11 +258,16 @@ export const deploymentsRoutes: FastifyPluginAsyncZod = async (app) => {
       }
 
       // Scope to deployments whose owning team the caller is a member of, then
-      // apply the optional filters. Include a build summary on each row.
+      // apply the optional filters. A team-scoped API token is further confined
+      // to its own team. Include a build summary on each row.
+      const tokenTeamId = callerTeamScope(request);
       const where = {
         preview: {
           ...(previewId ? { id: previewId } : {}),
-          project: { team: { members: { some: { userId } } } },
+          project: {
+            ...(tokenTeamId ? { teamId: tokenTeamId } : {}),
+            team: { members: { some: { userId } } },
+          },
         },
         ...(status ? { status } : {}),
       };

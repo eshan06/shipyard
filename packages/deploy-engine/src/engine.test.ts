@@ -5,6 +5,7 @@ import Docker from "dockerode";
 import {
   ComposePlanner,
   DependencyCycleError,
+  DockerDriver,
   InvalidPlanError,
   MockOrchestrator,
   aggregatePreviewState,
@@ -319,6 +320,80 @@ describe("portConfig / restartPolicy", () => {
     expect(restartPolicy("on-failure")).toEqual({ Name: "on-failure", MaximumRetryCount: 3 });
     expect(restartPolicy("unless-stopped")).toEqual({ Name: "unless-stopped" });
     expect(restartPolicy("no")).toEqual({ Name: "no" });
+  });
+});
+
+describe("DockerDriver.createAndStart idempotency", () => {
+  it("force-removes a leftover same-named container before creating (safe retry)", async () => {
+    const removed: string[] = [];
+    const startedContainers: string[] = [];
+
+    // Fake dockerode: a stale container with the deterministic name already
+    // exists (as it would after a partially-succeeded deploy that BullMQ retries).
+    const fakeDocker = {
+      listContainers: async () => [
+        { Id: "stale-cid", Names: ["/shipyard-feat-abc-web"] },
+      ],
+      getContainer: (id: string) => ({
+        remove: async () => {
+          removed.push(id);
+        },
+      }),
+      createContainer: async () => ({
+        id: "fresh-cid",
+        start: async () => {
+          startedContainers.push("fresh-cid");
+        },
+      }),
+    } as unknown as Docker;
+
+    const driver = new DockerDriver({ docker: fakeDocker });
+    const service = svc("web");
+    service.ports = [];
+
+    const id = await driver.createAndStart({
+      service,
+      image: "web:latest",
+      networkName: "shipyard-feat-abc",
+      networkAlias: "web",
+      labels: {},
+      slug: "feat-abc",
+    });
+
+    expect(removed).toEqual(["stale-cid"]);
+    expect(id).toBe("fresh-cid");
+    expect(startedContainers).toEqual(["fresh-cid"]);
+  });
+
+  it("does not remove containers whose name does not exactly match", async () => {
+    const removed: string[] = [];
+    const fakeDocker = {
+      // A substring match the daemon might return; only exact-name matches remove.
+      listContainers: async () => [
+        { Id: "other-cid", Names: ["/shipyard-feat-abc-web-sidecar"] },
+      ],
+      getContainer: (id: string) => ({
+        remove: async () => {
+          removed.push(id);
+        },
+      }),
+      createContainer: async () => ({ id: "fresh-cid", start: async () => undefined }),
+    } as unknown as Docker;
+
+    const driver = new DockerDriver({ docker: fakeDocker });
+    const service = svc("web");
+    service.ports = [];
+
+    await driver.createAndStart({
+      service,
+      image: "web:latest",
+      networkName: "shipyard-feat-abc",
+      networkAlias: "web",
+      labels: {},
+      slug: "feat-abc",
+    });
+
+    expect(removed).toEqual([]);
   });
 });
 

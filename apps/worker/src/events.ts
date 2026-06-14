@@ -99,24 +99,39 @@ export interface EventPublisherDeps {
  */
 export function createEventPublisher(deps: EventPublisherDeps): EventPublisher {
   const { connection, logger } = deps;
-  /** In-process next-seq cache, keyed by deploymentId. */
-  const seqByDeployment = new Map<string, number>();
+  /**
+   * Per-deployment seq allocator, keyed by deploymentId. We chain every
+   * allocation off a single in-flight promise so concurrent callers (the
+   * orchestrator hooks fire many `void events.log(...)` lines in a burst) are
+   * serialized and never collide on `(deploymentId, seq)`. The promise resolves
+   * to the *next* seq to hand out; the first link seeds it from the DB max.
+   */
+  const seqChainByDeployment = new Map<string, Promise<number>>();
 
-  /** Resolve (and cache) the next `seq` for a deployment, continuing the DB max. */
-  async function nextSeq(deploymentId: string): Promise<number> {
-    const cached = seqByDeployment.get(deploymentId);
-    if (cached !== undefined) {
-      seqByDeployment.set(deploymentId, cached + 1);
-      return cached;
-    }
-    const last = await prisma.logChunk.findFirst({
-      where: { deploymentId },
-      orderBy: { seq: "desc" },
-      select: { seq: true },
-    });
-    const start = (last?.seq ?? -1) + 1;
-    seqByDeployment.set(deploymentId, start + 1);
-    return start;
+  /**
+   * Resolve the next `seq` for a deployment, continuing the DB max and
+   * serializing concurrent callers via a per-deployment promise chain.
+   */
+  function nextSeq(deploymentId: string): Promise<number> {
+    const prior =
+      seqChainByDeployment.get(deploymentId) ??
+      // Seed lazily from the DB max on first use for this deployment.
+      prisma.logChunk
+        .findFirst({
+          where: { deploymentId },
+          orderBy: { seq: "desc" },
+          select: { seq: true },
+        })
+        .then((last) => (last?.seq ?? -1) + 1);
+
+    // The next link returns the seq we just handed out + 1. Errors are absorbed
+    // so a transient DB failure during seeding does not poison the whole chain.
+    const next = prior.then(
+      (seq) => seq + 1,
+      () => 0,
+    );
+    seqChainByDeployment.set(deploymentId, next);
+    return prior.catch(() => 0);
   }
 
   /** Publish a JSON payload to a channel, logging (never throwing on) failures. */
@@ -135,17 +150,26 @@ export function createEventPublisher(deps: EventPublisherDeps): EventPublisher {
       const at = event.at ?? new Date();
       const seq = await nextSeq(event.deploymentId);
 
-      await prisma.logChunk.create({
-        data: {
-          deploymentId: event.deploymentId,
-          serviceId: event.serviceId ?? null,
-          level,
-          source,
-          seq,
-          message: event.message,
-          timestamp: at,
-        },
-      });
+      // Best-effort durable write: the orchestrator hooks call this as a
+      // floating `void events.log(...)`, so a rejection here (transient DB
+      // error, pool exhaustion, FK race) would become an unhandled promise
+      // rejection and could crash the worker mid-deploy. Swallow + log instead;
+      // the live pub/sub line below still goes out.
+      try {
+        await prisma.logChunk.create({
+          data: {
+            deploymentId: event.deploymentId,
+            serviceId: event.serviceId ?? null,
+            level,
+            source,
+            seq,
+            message: event.message,
+            timestamp: at,
+          },
+        });
+      } catch (err) {
+        logger.warn({ err, deploymentId: event.deploymentId, seq }, "logChunk persist failed");
+      }
 
       const message: LiveLogMessage = LiveLogMessageSchema.parse({
         seq,

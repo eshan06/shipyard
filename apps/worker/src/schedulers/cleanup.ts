@@ -46,8 +46,11 @@ export interface CleanupCandidate {
   destroyTtlMinutes: number;
   /** Owning PR state, when the preview is linked to one. */
   pullRequestState?: PullRequestState | null;
-  /** When the owning PR last changed (proxy for close/merge time). */
-  pullRequestUpdatedAt?: Date | null;
+  /**
+   * When the owning PR was closed/merged — the TTL anchor. Falls back to the
+   * PR's `updatedAt` for legacy rows closed before `closedAt` was recorded.
+   */
+  pullRequestClosedAt?: Date | null;
 }
 
 /** A teardown decision produced by {@link findPreviewsToCleanup}. */
@@ -104,14 +107,15 @@ export function findPreviewsToCleanup(
   for (const preview of previews) {
     if (ALREADY_TEARING_DOWN.has(preview.status)) continue;
 
-    // TTL destroy (closed/merged PR past TTL) takes precedence.
+    // TTL destroy (closed/merged PR past TTL) takes precedence. Anchor on the
+    // recorded close/merge instant so a later row mutation cannot reset the clock.
     if (
       preview.pullRequestState &&
       CLOSED_PR_STATES.has(preview.pullRequestState) &&
-      preview.pullRequestUpdatedAt
+      preview.pullRequestClosedAt
     ) {
       const elapsedMin =
-        (nowMs - preview.pullRequestUpdatedAt.getTime()) / MS_PER_MINUTE;
+        (nowMs - preview.pullRequestClosedAt.getTime()) / MS_PER_MINUTE;
       if (elapsedMin >= preview.destroyTtlMinutes) {
         decisions.push({ previewId: preview.id, reason: "ttl" });
         continue;
@@ -166,7 +170,13 @@ export async function runCleanupTick(
 
   for (const decision of decisions) {
     const payload = DestroyJobSchema.parse(decision);
-    await deps.destroyQueue.add(QUEUE.destroy, payload, DEFAULT_JOB_OPTIONS);
+    // Deterministic jobId keyed by preview + reason so re-ticking the scheduler
+    // (which happens every CLEANUP_INTERVAL_MS while a preview is still RUNNING)
+    // does not stack redundant destroy jobs for the same preview.
+    await deps.destroyQueue.add(QUEUE.destroy, payload, {
+      ...DEFAULT_JOB_OPTIONS,
+      jobId: `destroy:${payload.previewId}:${payload.reason}`,
+    });
   }
 
   if (decisions.length > 0) {
@@ -222,7 +232,7 @@ async function loadCleanupCandidates(
       lastActivityAt: true,
       autoStopMinutes: true,
       project: { select: { destroyTtlMinutes: true } },
-      pullRequest: { select: { state: true, updatedAt: true } },
+      pullRequest: { select: { state: true, closedAt: true, updatedAt: true } },
     },
   });
 
@@ -235,6 +245,9 @@ async function loadCleanupCandidates(
     destroyTtlMinutes:
       row.project?.destroyTtlMinutes ?? deps.config.PREVIEW_DESTROY_TTL_MINUTES,
     pullRequestState: row.pullRequest?.state ?? null,
-    pullRequestUpdatedAt: row.pullRequest?.updatedAt ?? null,
+    // Prefer the recorded close instant; fall back to updatedAt for legacy rows
+    // that were closed before closedAt existed.
+    pullRequestClosedAt:
+      row.pullRequest?.closedAt ?? row.pullRequest?.updatedAt ?? null,
   }));
 }

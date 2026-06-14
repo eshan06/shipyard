@@ -1,0 +1,49 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Non-secret configuration for the Shipyard control plane.
+#
+# Secrets (DATABASE_URL, REDIS_URL, SECRETS_ENCRYPTION_KEY, SESSION_SECRET,
+# GitHub creds) live in the Secret (20-secret.yaml) — NOT here. The in-cluster
+# DNS names below assume Postgres/Redis run inside the cluster (e.g. via the
+# Bitnami charts or the StatefulSet of your choice) reachable at `postgres` /
+# `redis`. If you use a managed DB/cache, drop those connection strings into the
+# Secret instead and remove the matching keys here.
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: shipyard-config
+  namespace: shipyard
+  labels:
+    app.kubernetes.io/part-of: shipyard
+data:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+
+  # --- API ---
+  API_HOST: "0.0.0.0"
+  API_PORT: "4000"
+  # Public URLs the API advertises (CORS origin + OAuth redirects). Replace the
+  # hostnames with your real ingress domains.
+  PUBLIC_API_URL: "https://api.shipyard.example.com"
+  PUBLIC_APP_URL: "https://shipyard.example.com"
+  PREVIEW_BASE_DOMAIN: "preview.shipyard.example.com"
+  DEV_AUTH: "false"
+  RATE_LIMIT_MAX: "200"
+  RATE_LIMIT_WINDOW: "1 minute"
+
+  # --- Worker ---
+  DEPLOY_DRIVER: "mock" # set to "docker" only where the worker has a Docker daemon
+  WORKER_CONCURRENCY: "4"
+  CLEANUP_INTERVAL_MS: "60000"
+  COST_INTERVAL_MS: "300000"
+  PREVIEW_AUTO_STOP_MINUTES: "120"
+  PREVIEW_DESTROY_TTL_MINUTES: "60"
+  COST_PER_VCPU_HOUR: "0.04"
+  COST_PER_GB_MEM_HOUR: "0.005"
+  COST_PER_GB_STORAGE_HOUR: "0.0002"
+  COST_PER_GB_EGRESS: "0.09"
+
+  # --- Web ---
+  # The browser hits the API same-origin via the Next rewrite; this destination
+  # is read at runtime. In-cluster, point it at the API Service.
+  NEXT_PUBLIC_API_URL: "http://shipyard-api:4000"

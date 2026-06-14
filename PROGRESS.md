@@ -1,76 +1,46 @@
 # Shipyard — Build Progress & Backlog
 
-> Durable state for the autonomous build. Updated at the end of every work wave.
-> If you are an agent resuming work: read this top-to-bottom, then read
-> `docs/ENGINEERING.md` and the memory note `fast-fs-build-location`, and
-> continue the next unchecked item.
+**Status:** Phases 0–6 complete. Near production-ready. See `docs/RETURN_HANDOFF.md`.
+**Last updated:** 2026-06-14 (final wave — review fixes + production hardening)
 
-**Last updated:** 2026-06-14 (wave 1 — Phase 1 verified green; app scaffolding)
-**Current phase:** Phase 2 — Control-plane API
+## Build note (for resuming agents)
+Build on the fast overlay fs `/home/agent/build` (the OneDrive mount is ~300x
+slower for IO). `cd /home/agent/build` for everything; deliver via
+`bash scripts/sync-to-onedrive.sh`. Run `bash scripts/strip-write-artifacts.sh`
+after write waves. See the `fast-fs-build-location` memory.
 
-## CRITICAL build note
+## Done
+- [x] Phase 0 — repo/monorepo foundation, infra compose, Prisma model, docs
+- [x] Phase 1 — packages: config, core (+jobs contract), db (+seed), deploy-engine
+      (planner/docker/mock). 120 package tests green.
+- [x] Phase 2 — apps/api (Fastify): config/app/plugins (prisma/redis/queues/auth/
+      swagger), error handler, rbac, pagination, audit, serialize, SSE; routers:
+      health, auth (dev-login + GitHub OAuth), me, teams, projects, previews
+      (+actions), deployments+builds, env vars/secrets, seeds, tokens, services/
+      reviews/costs, pull-requests/notifications/audit, GitHub webhooks, SSE
+      streams. 20 tests incl. real-DB integration. Adversarial security review
+      applied (token team-scoping fix, etc.).
+- [x] Phase 3 — apps/worker (BullMQ): deploy/destroy workers, cleanup + cost
+      schedulers, event publisher (LogChunk + redis pub/sub). 33 tests.
+- [x] Phase 4 — apps/web (Next 15 + Tailwind + Radix): design system, shell,
+      typed API client + SWR + SSE; pages: overview, previews(list/detail+live
+      logs+actions), deployments(+detail), builds, costs(charts), projects(+env/
+      secrets/seeds/settings), settings/team(members+tokens), login. 12 routes,
+      lint/typecheck/build green.
+- [x] Phase 5 — DB migrated + seeded; **end-to-end verified live** (PR webhook →
+      RUNNING preview via mock orchestrator; scripts/e2e-webhook.mjs); full-stack
+      run verified (web→API proxy + auth + data).
+- [x] Phase 6 — Dockerfiles (api/worker/web, built+smoke-tested), prod compose,
+      k8s manifests, DEPLOYMENT.md, RUNBOOK.md, README quickstart, CONTRIBUTING,
+      final adversarial review wave + fixes. RETURN_HANDOFF.md for the user.
 
-Build on the **fast overlay fs** `/home/agent/build`, NOT the OneDrive mount
-(`/c/Users/.../shipyard`), which is ~300x slower for installs/builds. `cd
-/home/agent/build` for everything. Deliver by rsyncing source back to OneDrive at
-each checkpoint (see `fast-fs-build-location` memory). Run
-`bash scripts/strip-write-artifacts.sh` after every write wave (an editor tool
-intermittently appends a `</content>` line) before typecheck/build.
+## Blocked-on-user (return handoff — see docs/RETURN_HANDOFF.md)
+- [!] `pnpm install` on your machine (node_modules not synced).
+- [!] GitHub App (App ID/private key/webhook secret) for real PR webhooks.
+- [!] GitHub OAuth app (client id/secret) for dashboard login; set DEV_AUTH=false.
+- [!] DEPLOY_DRIVER=docker + a Docker host for real (non-mock) preview deploys.
+- [!] Fill k8s image refs/hostnames in infra/k8s/.
 
-## Status legend
-
-- [ ] todo  ·  [~] in progress  ·  [x] done  ·  [!] blocked (needs user)
-
-## Blocked-on-user (return handoff)
-
-- [!] GitHub App (App ID, private key, webhook secret) — real PR webhook flow.
-- [!] GitHub OAuth app (login) client id/secret.
-- [!] Production Docker host / k8s target for real preview deploys.
-- [!] Reinstall deps on the user's machine (`pnpm install`) — node_modules is
-      built only on the sandbox fast fs, not synced to OneDrive.
-
----
-
-## Phase 0 — Repo foundation  [x]
-
-- [x] monorepo scaffold, infra docker-compose, Prisma model, ARCHITECTURE.md
-
-## Phase 1 — Foundation & shared packages  [x]  (GREEN: 118 tests pass)
-
-- [x] `packages/config` — tsconfig/eslint/prettier presets (+ tests)
-- [x] `packages/core` — zod schemas, DTOs, status machines, crypto, cost, ids,
-      errors, Result, and `jobs.ts` (queue/channel contracts) (54 tests)
-- [x] `packages/db` — Prisma client singleton, seed (rich demo data) (7 tests)
-- [x] `packages/deploy-engine` — planner, docker driver, orchestrator, mock (44 tests)
-- [x] Root tooling: eslint, prettier, vitest workspace, CI workflow
-- [x] `.env.example`, `docs/ENGINEERING.md` (cross-cutting contracts)
-- [x] App `package.json` + tsconfig/tsup/eslint/vitest scaffolding (api, worker)
-
-## Phase 2 — Control-plane API (`apps/api`)  [~]
-
-- [ ] Foundation: config (zod env), server factory, plugins (prisma, redis,
-      queues, auth, rbac, rate-limit, swagger, sse), error handler, route
-      registry + stubs, health route, auth routes, teams reference router
-- [ ] Feature routers + services: projects, PRs, previews (+actions),
-      deployments, builds, services, env vars/secrets, seeds, reviews, costs,
-      audit, tokens, notifications, webhooks (GitHub), SSE log/status streams
-- [ ] OpenAPI, integration tests, adversarial security review + fixes
-
-## Phase 3 — Workers (`apps/worker`)
-
-- [ ] BullMQ setup; deploy / destroy-cleanup / cost / log-relay workers
-      (deploy-engine Mock + Docker drivers); tests; review
-
-## Phase 4 — Dashboard (`apps/web`)
-
-- [ ] Design system + shell; previews list/detail; deployments + live logs;
-      failed builds; costs; env/secrets UI; projects/team settings; states/a11y
-
-## Phase 5 — Integration, tests, hardening, demo data
-
-- [ ] E2E mock flow (PR→preview→destroy) vs real Postgres+Redis; security pass;
-      docs (README/CONTRIBUTING/runbook); CI green
-
-## Phase 6 — Production readiness
-
-- [ ] Dockerfiles, prod compose, k8s, observability, runbook, final review
+## Known follow-ups (non-blocking)
+- Container image size (~1.8–2GB) — slim via `pnpm deploy` (docs/DEPLOYMENT.md).
+- Bound `trustProxy` to the real proxy / deploy behind XFF-stripping proxy.

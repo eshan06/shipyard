@@ -143,6 +143,11 @@ model PullRequest {
   labels      String[]         @default([])
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
+  // Set once on the OPEN→CLOSED/MERGED transition. The closed-PR destroy TTL
+  // anchors on this (not `updatedAt`, which any later row mutation would bump),
+  // so a long-closed preview is torn down on schedule. See
+  // apps/worker/src/schedulers/cleanup.ts.
+  closedAt    DateTime?
 
   project  Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
   previews Preview[]
@@ -335,7 +340,10 @@ model LogChunk {
   deployment Deployment? @relation(fields: [deploymentId], references: [id], onDelete: Cascade)
   service    Service?    @relation(fields: [serviceId], references: [id], onDelete: Cascade)
 
-  @@index([deploymentId, seq])
+  // A deployment's log lines carry a monotonic, gap-free seq. The unique
+  // constraint turns any seq-allocation regression into a loud failure instead
+  // of a silent duplicate (see apps/worker/src/events.ts nextSeq).
+  @@unique([deploymentId, seq])
   @@index([serviceId, seq])
 }
 
@@ -456,6 +464,7 @@ model CostRecord {
 
 enum WebhookStatus {
   RECEIVED
+  PROCESSING
   PROCESSED
   FAILED
   SKIPPED

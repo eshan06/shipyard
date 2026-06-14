@@ -218,6 +218,13 @@ export class DockerDriver {
     const { service, image, networkName, networkAlias, labels } = options;
     const containerName = `shipyard-${options.slug}-${service.name}`;
 
+    // Idempotent on retry: a partially-succeeded deploy (some services created,
+    // a later one failed) is re-run from scratch by BullMQ. Without this, the
+    // first already-existing container would fail create with HTTP 409
+    // ("name already in use") and the retry could never make progress. Remove
+    // any leftover container with this deterministic name first (best-effort).
+    await this.removeByName(containerName);
+
     const env = Object.entries(service.env).map(([k, v]) => `${k}=${v}`);
     const { exposed, bindings } = portConfig(service);
     const serviceLabels: Record<string, string> = {
@@ -441,6 +448,31 @@ export class DockerDriver {
     } catch (error) {
       if (isDaemonUnavailable(error)) throw new DaemonUnavailableError(error);
       if (!isNotModifiedOrMissing(error)) throw error;
+    }
+  }
+
+  /**
+   * Force-remove a container by its exact name, if one exists. Used to make
+   * {@link createAndStart} idempotent across retries (deterministic names would
+   * otherwise collide with HTTP 409). No-op when no such container exists.
+   */
+  async removeByName(name: string): Promise<void> {
+    let existing: Docker.ContainerInfo[];
+    try {
+      existing = await this.docker.listContainers({
+        all: true,
+        // Docker matches the `name` filter as a substring/regex; the exact-name
+        // check below makes this precise.
+        filters: { name: [name] },
+      });
+    } catch (error) {
+      rethrowDaemon(error);
+    }
+    for (const info of existing) {
+      // dockerode prefixes container names with "/"; match either form.
+      if (info.Names?.some((n) => n === name || n === `/${name}`)) {
+        await this.remove(info.Id);
+      }
     }
   }
 

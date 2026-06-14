@@ -1,0 +1,192 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Shipyard — production-style full stack (postgres, redis, api, worker, web).
+#
+# This composes the whole control plane from the images built by the per-app
+# Dockerfiles. It is meant for a single-host deployment or a staging box; for
+# multi-node use the Kubernetes manifests in infra/k8s/.
+#
+# Quick start (from the repo root):
+#   1. Copy and fill the env file:   cp .env.example .env
+#      - SECRETS_ENCRYPTION_KEY:  openssl rand -base64 32
+#      - SESSION_SECRET:          openssl rand -hex 32
+#      - Set DATABASE_URL / REDIS_URL to the in-network service names (below).
+#   2. Build images:    docker compose -f infra/docker/docker-compose.prod.yml build
+#   3. Run migrations:  docker compose -f infra/docker/docker-compose.prod.yml run --rm migrate
+#   4. Start the stack: docker compose -f infra/docker/docker-compose.prod.yml up -d
+#
+# The `migrate` service is a one-off (profile: tools) that runs
+# `prisma migrate deploy` and exits; api/worker only start once it has succeeded
+# in step 3. See docs/DEPLOYMENT.md and docs/RUNBOOK.md.
+#
+# NOTE: inside this network, services reach each other by name, so the api/worker
+# must use DATABASE_URL=...@postgres:5432/... and REDIS_URL=redis://redis:6379.
+# These are provided as defaults below and can be overridden in .env.
+# ──────────────────────────────────────────────────────────────────────────
+name: shipyard
+
+x-app-env: &app-env
+  # Shared, in-network connection strings. The `${VAR:-default}` form lets .env
+  # override them while keeping the stack runnable out of the box.
+  DATABASE_URL: ${DATABASE_URL:-postgresql://shipyard:shipyard@postgres:5432/shipyard?schema=public}
+  REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+  SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?set SECRETS_ENCRYPTION_KEY in .env (openssl rand -base64 32)}
+  NODE_ENV: ${NODE_ENV:-production}
+  LOG_LEVEL: ${LOG_LEVEL:-info}
+  PREVIEW_BASE_DOMAIN: ${PREVIEW_BASE_DOMAIN:-preview.localhost}
+
+services:
+  # ── Data stores ──────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-shipyard}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shipyard}
+      POSTGRES_DB: ${POSTGRES_DB:-shipyard}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    networks: [shipyard]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-shipyard} -d ${POSTGRES_DB:-shipyard}"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    networks: [shipyard]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ── One-off DB migration (run before first boot / on every deploy) ─────────
+  # Runs `prisma migrate deploy` against DATABASE_URL and exits. Invoke with:
+  #   docker compose -f infra/docker/docker-compose.prod.yml run --rm migrate
+  # It is gated behind a profile so it never starts as part of `up`.
+  migrate:
+    profiles: ["tools"]
+    image: ${API_IMAGE:-shipyard-api:latest}
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    environment:
+      <<: *app-env
+    command:
+      ["node_modules/.bin/prisma", "migrate", "deploy", "--schema", "packages/db/prisma/schema.prisma"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [shipyard]
+    restart: "no"
+
+  # ── API (Fastify control plane) ───────────────────────────────────────────
+  api:
+    image: ${API_IMAGE:-shipyard-api:latest}
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      <<: *app-env
+      API_HOST: 0.0.0.0
+      API_PORT: 4000
+      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:4000}
+      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
+      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env (openssl rand -hex 32)}
+      DEV_AUTH: ${DEV_AUTH:-false}
+      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-200}
+      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1 minute}
+      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
+      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
+      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+    ports:
+      - "${API_PORT:-4000}:4000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [shipyard]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ── Worker (BullMQ deploy / destroy / cleanup / cost) ─────────────────────
+  worker:
+    image: ${WORKER_IMAGE:-shipyard-worker:latest}
+    build:
+      context: ../..
+      dockerfile: apps/worker/Dockerfile
+    restart: unless-stopped
+    env_file:
+      - path: ../../.env
+        required: false
+    environment:
+      <<: *app-env
+      DEPLOY_DRIVER: ${DEPLOY_DRIVER:-mock}
+      DOCKER_HOST: ${DOCKER_HOST:-}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
+      CLEANUP_INTERVAL_MS: ${CLEANUP_INTERVAL_MS:-60000}
+      COST_INTERVAL_MS: ${COST_INTERVAL_MS:-300000}
+      PREVIEW_AUTO_STOP_MINUTES: ${PREVIEW_AUTO_STOP_MINUTES:-120}
+      PREVIEW_DESTROY_TTL_MINUTES: ${PREVIEW_DESTROY_TTL_MINUTES:-60}
+      COST_PER_VCPU_HOUR: ${COST_PER_VCPU_HOUR:-0.04}
+      COST_PER_GB_MEM_HOUR: ${COST_PER_GB_MEM_HOUR:-0.005}
+      COST_PER_GB_STORAGE_HOUR: ${COST_PER_GB_STORAGE_HOUR:-0.0002}
+      COST_PER_GB_EGRESS: ${COST_PER_GB_EGRESS:-0.09}
+    # The `docker` deploy driver needs access to a Docker daemon to build/run
+    # preview stacks. Uncomment to bind the host socket (single-host only):
+    # volumes:
+    #   - /var/run/docker.sock:/var/run/docker.sock
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [shipyard]
+
+  # ── Web (Next.js dashboard) ───────────────────────────────────────────────
+  web:
+    image: ${WEB_IMAGE:-shipyard-web:latest}
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    environment:
+      NODE_ENV: ${NODE_ENV:-production}
+      PORT: 3000
+      # Read at runtime by next.config.mjs rewrites — point the browser's
+      # same-origin /api/v1 proxy at the API service (in-network name `api`).
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:4000}
+    ports:
+      - "${WEB_PORT:-3000}:3000"
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [shipyard]
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+
+networks:
+  shipyard:
+    driver: bridge
+
+volumes:
+  pgdata:
+  redisdata:

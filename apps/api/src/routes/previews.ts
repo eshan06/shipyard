@@ -45,6 +45,7 @@ import { Prisma } from "@shipyard/db";
 import { writeAudit } from "../lib/audit.js";
 import { paginate, type PaginatableDelegate } from "../lib/pagination.js";
 import {
+  callerTeamScope,
   requireTeamRole,
   teamIdForPreview,
   teamIdForProject,
@@ -146,7 +147,11 @@ export const previewsRoutes: FastifyPluginAsyncZod = async (app) => {
         await requireTeamRole(app, request, teamId, "VIEWER");
         where.projectId = projectId;
       } else {
-        where.project = { team: { members: { some: { userId } } } };
+        // A team-scoped API token may only see previews under its own team.
+        const tokenTeamId = callerTeamScope(request);
+        where.project = tokenTeamId
+          ? { teamId: tokenTeamId, team: { members: { some: { userId } } } }
+          : { team: { members: { some: { userId } } } };
       }
       if (status !== undefined) where.status = status;
 

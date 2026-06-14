@@ -98,6 +98,31 @@ export async function requireTeamRole(
 }
 
 /**
+ * The bound team a list/collection query must be confined to, or `undefined`
+ * when no token-confinement applies.
+ *
+ * API tokens are team-scoped credentials: a token minted under team A must never
+ * read across teams B/C the minting user also belongs to (see
+ * {@link requireTeamRole}). Single-resource routes get this for free because
+ * they resolve the owning team and call `requireTeamRole`, but unfiltered list
+ * endpoints scope by `userId` (every team the user is on) and would otherwise
+ * leak cross-team data to a confined token. List handlers call this and AND the
+ * result into their `where` clause to close that gap.
+ *
+ * @param request - The current request (carries `request.auth`).
+ * @returns The token's bound `teamId` to confine to, or `undefined` for session
+ *   callers / unbound tokens (no extra confinement; the existing membership
+ *   scope already limits visibility to the user's own teams).
+ */
+export function callerTeamScope(request: FastifyRequest): string | undefined {
+  const auth = request.auth;
+  if (auth && auth.kind === "token" && auth.teamId !== undefined) {
+    return auth.teamId;
+  }
+  return undefined;
+}
+
+/**
  * The minimal Prisma surface the resolvers below need. Accepting this rather
  * than the full `PrismaClient` keeps the resolvers easy to unit test.
  */

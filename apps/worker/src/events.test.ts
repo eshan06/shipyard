@@ -61,6 +61,32 @@ describe("createEventPublisher.log", () => {
     expect(JSON.parse(payload as string)).toMatchObject({ seq: 0, message: "first" });
   });
 
+  it("assigns unique, monotonic seqs to a concurrent burst (no collision)", async () => {
+    // The orchestrator hooks fire many `void events.log(...)` lines at once.
+    // Several concurrent FIRST calls for the same deployment must not all read
+    // the same DB max and then write duplicate seqs. The allocator serializes
+    // them via a per-deployment promise chain, so the result is 0..N-1 unique.
+    const connection = fakeConnection();
+    const events = createEventPublisher({
+      connection: connection as never,
+      logger: testLogger(),
+    });
+
+    const N = 25;
+    const seqs = await Promise.all(
+      Array.from({ length: N }, (_, i) =>
+        events.log({ deploymentId: "dep-burst", message: `line ${i}` }),
+      ),
+    );
+
+    expect(new Set(seqs).size).toBe(N);
+    expect([...seqs].sort((a, b) => a - b)).toEqual(
+      Array.from({ length: N }, (_, i) => i),
+    );
+    const persistedSeqs = created.map((c) => c.seq);
+    expect(new Set(persistedSeqs).size).toBe(N);
+  });
+
   it("continues the seq from the database max on first use", async () => {
     maxSeq = 4;
     const connection = fakeConnection();

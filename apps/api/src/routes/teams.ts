@@ -33,7 +33,7 @@ import { Prisma } from "@shipyard/db";
 
 import { writeAudit } from "../lib/audit.js";
 import { paginate } from "../lib/pagination.js";
-import { requireTeamRole } from "../lib/rbac.js";
+import { callerTeamScope, requireTeamRole } from "../lib/rbac.js";
 import { toTeamDto } from "../lib/serialize.js";
 
 import {
@@ -72,11 +72,17 @@ export const teamsRoutes: FastifyPluginAsyncZod = async (app) => {
       const userId = request.auth!.userId;
       const { cursor, limit, order } = request.query;
 
+      // A team-scoped API token may only see its own team.
+      const tokenTeamId = callerTeamScope(request);
+      const where = tokenTeamId
+        ? { id: tokenTeamId, members: { some: { userId } } }
+        : { members: { some: { userId } } };
+
       const page = await paginate(app.prisma.team, {
         cursor,
         limit,
         order,
-        where: { members: { some: { userId } } },
+        where,
       });
 
       return {

@@ -1,0 +1,60 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Shipyard worker — BullMQ consumers (deploy / destroy / cleanup / cost).
+#
+# Headless: no Service, no HTTP probes. BullMQ guarantees a job is processed by
+# exactly one worker, so scaling `replicas` and/or WORKER_CONCURRENCY simply
+# raises throughput safely — the repeatable cleanup/cost schedulers register on
+# a fixed jobId and de-duplicate. See docs/RUNBOOK.md (scaling).
+#
+# DEPLOY_DRIVER=docker requires the worker to reach a Docker daemon (DOCKER_HOST,
+# or a mounted socket / DinD sidecar) — out of scope for this manifest; the
+# default is `mock` (set in the ConfigMap).
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shipyard-worker
+  namespace: shipyard
+  labels:
+    app.kubernetes.io/part-of: shipyard
+    app.kubernetes.io/component: worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: worker
+  strategy:
+    # Drain in-flight jobs cleanly: recreate avoids two generations racing the
+    # repeatable schedulers during a rollout.
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/part-of: shipyard
+        app.kubernetes.io/component: worker
+    spec:
+      # Give in-flight deploy/destroy jobs time to finish on SIGTERM.
+      terminationGracePeriodSeconds: 60
+      containers:
+        - name: worker
+          # Replace OWNER + tag with your registry/image.
+          image: ghcr.io/OWNER/shipyard-worker:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: shipyard-config
+            - secretRef:
+                name: shipyard-secrets
+          resources:
+            requests:
+              cpu: "150m"
+              memory: "256Mi"
+            limits:
+              cpu: "1"
+              memory: "768Mi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsNonRoot: true
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

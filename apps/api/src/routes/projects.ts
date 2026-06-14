@@ -36,7 +36,7 @@ import { Prisma } from "@shipyard/db";
 
 import { writeAudit } from "../lib/audit.js";
 import { paginate } from "../lib/pagination.js";
-import { requireTeamRole, teamIdForProject } from "../lib/rbac.js";
+import { callerTeamScope, requireTeamRole, teamIdForProject } from "../lib/rbac.js";
 import { iso } from "../lib/serialize.js";
 
 import { ErrorResponseSchema, listResponse } from "./schemas.js";
@@ -148,10 +148,15 @@ export const projectsRoutes: FastifyPluginAsyncZod = async (app) => {
         await requireTeamRole(app, request, teamId, "VIEWER");
       }
 
+      // A team-scoped API token may only see its own team (a different explicit
+      // teamId already 403s via requireTeamRole above).
+      const tokenTeamId = callerTeamScope(request);
       const where: Prisma.ProjectWhereInput =
         teamId !== undefined
           ? { teamId }
-          : { team: { members: { some: { userId } } } };
+          : tokenTeamId
+            ? { teamId: tokenTeamId, team: { members: { some: { userId } } } }
+            : { team: { members: { some: { userId } } } };
 
       const page = await paginate(app.prisma.project, {
         cursor,

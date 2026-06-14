@@ -24,7 +24,7 @@ function candidate(overrides: Partial<CleanupCandidate>): CleanupCandidate {
     autoStopMinutes: 120,
     destroyTtlMinutes: 60,
     pullRequestState: null,
-    pullRequestUpdatedAt: null,
+    pullRequestClosedAt: null,
     ...overrides,
   };
 }
@@ -69,7 +69,7 @@ describe("findPreviewsToCleanup", () => {
       candidate({
         status: "STOPPED",
         pullRequestState: "CLOSED",
-        pullRequestUpdatedAt: closedAt,
+        pullRequestClosedAt: closedAt,
       }),
     ]);
     expect(out).toEqual([{ previewId: "prev-1", reason: "ttl" }]);
@@ -81,7 +81,7 @@ describe("findPreviewsToCleanup", () => {
       candidate({
         isPinned: true,
         pullRequestState: "MERGED",
-        pullRequestUpdatedAt: mergedAt,
+        pullRequestClosedAt: mergedAt,
       }),
     ]);
     expect(out).toEqual([{ previewId: "prev-1", reason: "ttl" }]);
@@ -93,7 +93,7 @@ describe("findPreviewsToCleanup", () => {
       candidate({
         lastActivityAt: old,
         pullRequestState: "CLOSED",
-        pullRequestUpdatedAt: old,
+        pullRequestClosedAt: old,
       }),
     ]);
     expect(out).toEqual([{ previewId: "prev-1", reason: "ttl" }]);

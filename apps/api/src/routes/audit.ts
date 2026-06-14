@@ -20,7 +20,7 @@ import { z } from "zod";
 
 import { PaginationQuerySchema } from "@shipyard/core";
 
-import { requireTeamRole } from "../lib/rbac.js";
+import { callerTeamScope, requireTeamRole } from "../lib/rbac.js";
 
 import {
   toAuditLogDto,
@@ -86,6 +86,9 @@ export const auditRoutes: FastifyPluginAsyncZod = async (app) => {
         await requireTeamRole(app, request, teamId, "VIEWER");
         where.teamId = teamId;
       } else {
+        // A team-scoped API token may only read its own team's audit log.
+        const tokenTeamId = callerTeamScope(request);
+        if (tokenTeamId) where.teamId = tokenTeamId;
         where.team = { members: { some: { userId } } };
       }
 

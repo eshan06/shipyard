@@ -50,21 +50,30 @@ ENV NODE_ENV=production \
 WORKDIR /app
 
 # Hoisted node_modules (carries `next`, react, and the transpiled core dep).
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/package.json /app/pnpm-workspace.yaml ./
+# `--chown` so the unprivileged `node` user can read everything (Next reads its
+# config + manifests from disk at start).
+COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=build --chown=node:node /app/package.json /app/pnpm-workspace.yaml ./
 # The Next.js config is read at runtime (rewrites destination, transpilePackages).
-COPY --from=build /app/apps/web/package.json   ./apps/web/package.json
-COPY --from=build /app/apps/web/next.config.mjs ./apps/web/next.config.mjs
-COPY --from=build /app/apps/web/.next          ./apps/web/.next
-# Workspace core dep resolved by the Next server at runtime.
-COPY --from=build /app/packages/core/package.json ./packages/core/package.json
-COPY --from=build /app/packages/core/dist         ./packages/core/dist
+COPY --from=build --chown=node:node /app/apps/web/package.json   ./apps/web/package.json
+COPY --from=build --chown=node:node /app/apps/web/next.config.mjs ./apps/web/next.config.mjs
+COPY --from=build --chown=node:node /app/apps/web/.next          ./apps/web/.next
+# Workspace core dep resolved by the Next server at runtime (also bundled into
+# .next via transpilePackages, but kept for completeness).
+COPY --from=build --chown=node:node /app/packages/core/package.json ./packages/core/package.json
+COPY --from=build --chown=node:node /app/packages/core/dist         ./packages/core/dist
+RUN mkdir -p node_modules/@shipyard \
+ && ln -sfn ../../packages/core node_modules/@shipyard/core
 
+# Next reads next.config.mjs relative to the cwd, so run from the app dir and
+# invoke the `next` binary directly (no pnpm/corepack at runtime → no network).
+WORKDIR /app/apps/web
 USER node
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=25s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||3000)+'/').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-# `next start -p 3000` via the workspace script; binds 0.0.0.0 by default.
-CMD ["pnpm", "--filter", "@shipyard/web", "start"]
+# `next start` binds 0.0.0.0:$PORT by default; the binary lives in the hoisted
+# root node_modules/.bin.
+CMD ["/app/node_modules/.bin/next", "start", "-p", "3000"]

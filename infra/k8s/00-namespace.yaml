@@ -1,0 +1,8 @@
+# Shipyard namespace. All Shipyard resources live here.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shipyard
+  labels:
+    app.kubernetes.io/part-of: shipyard
+    app.kubernetes.io/managed-by: kubectl

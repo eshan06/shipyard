@@ -146,6 +146,45 @@ describe("teams routes", () => {
     });
   });
 
+  describe("token team-scoping", () => {
+    it("confines GET /teams to a token's bound team (no cross-team leak)", async () => {
+      const findMany = vi.fn(async () => [teamRow({ id: "team_bound" })]);
+      // A team-scoped API token: auth looks it up by hash, then best-effort
+      // updates lastUsedAt. RBAC must constrain the list to teamId="team_bound".
+      const tokenFindUnique = vi.fn(async () => ({
+        id: "tok_1",
+        userId: USER_ID,
+        teamId: "team_bound",
+        scopes: [],
+        revokedAt: null,
+        expiresAt: null,
+      }));
+      app = await buildTestApp({
+        prisma: {
+          team: { findMany },
+          apiToken: {
+            findUnique: tokenFindUnique,
+            update: vi.fn(async () => ({})),
+          },
+        },
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/api/v1/teams?limit=10",
+        headers: { authorization: "Bearer sk_test_rawtoken" },
+      });
+
+      expect(res.statusCode).toBe(200);
+      // The where must be AND-ed with the bound team id, not just userId.
+      expect(findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: "team_bound", members: { some: { userId: USER_ID } } },
+        }),
+      );
+    });
+  });
+
   describe("RBAC", () => {
     it("returns 403 on PATCH when the caller is below ADMIN", async () => {
       const findUnique = vi.fn(async () => ({ role: "MEMBER" }));

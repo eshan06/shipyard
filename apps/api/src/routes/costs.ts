@@ -21,7 +21,7 @@ import { z } from "zod";
 import { PaginationQuerySchema, roundUsd } from "@shipyard/core";
 
 import { paginate } from "../lib/pagination.js";
-import { requireTeamRole, teamIdForPreview } from "../lib/rbac.js";
+import { callerTeamScope, requireTeamRole, teamIdForPreview } from "../lib/rbac.js";
 
 import {
   CostSummaryResponseSchema,
@@ -146,8 +146,10 @@ export const costsRoutes: FastifyPluginAsyncZod = async (app) => {
         await requireTeamRole(app, request, teamId, "VIEWER");
         teamIds = [teamId];
       } else {
+        // A team-scoped API token may only roll up its own team.
+        const tokenTeamId = callerTeamScope(request);
         const memberships = await app.prisma.membership.findMany({
-          where: { userId },
+          where: { userId, ...(tokenTeamId ? { teamId: tokenTeamId } : {}) },
           select: { teamId: true },
         });
         teamIds = memberships.map((m) => m.teamId);

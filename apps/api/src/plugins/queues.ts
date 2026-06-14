@@ -56,12 +56,27 @@ async function queuesPlugin(
     destroy,
     async enqueueDeploy(payload: DeployJob): Promise<string> {
       const data = DeployJobSchema.parse(payload);
-      const job = await deploy.add(QUEUE.deploy, data, DEFAULT_JOB_OPTIONS);
+      // Deterministic jobId so concurrent duplicates (double webhook/API call)
+      // collapse: BullMQ rejects the second add while the first is still
+      // queued/active. The in-processor state-machine guards remain the second
+      // line of defence. Keyed by deploymentId (each redeploy mints a new one).
+      const job = await deploy.add(QUEUE.deploy, data, {
+        ...DEFAULT_JOB_OPTIONS,
+        // NB: BullMQ forbids ":" in a custom jobId (its internal key separator).
+        jobId: `deploy-${data.deploymentId}`,
+      });
       return String(job.id);
     },
     async enqueueDestroy(payload: DestroyJob): Promise<string> {
       const data = DestroyJobSchema.parse(payload);
-      const job = await destroy.add(QUEUE.destroy, data, DEFAULT_JOB_OPTIONS);
+      // Deterministic jobId keyed by preview + reason so repeated destroy
+      // enqueues for the same preview (e.g. the cleanup scheduler re-ticking
+      // while the preview is still RUNNING) do not stack redundant jobs.
+      const job = await destroy.add(QUEUE.destroy, data, {
+        ...DEFAULT_JOB_OPTIONS,
+        // NB: BullMQ forbids ":" in a custom jobId (its internal key separator).
+        jobId: `destroy-${data.previewId}-${data.reason}`,
+      });
       return String(job.id);
     },
   };

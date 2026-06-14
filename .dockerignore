@@ -1,0 +1,59 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Docker build-context ignore for Shipyard.
+#
+# The build context is the repo root. We deliberately copy only manifests first
+# (for cached installs) and then `src`, so this file keeps the context small and
+# — critically — prevents host build artifacts and secrets from leaking into the
+# image. Everything is rebuilt cleanly inside the image.
+# ──────────────────────────────────────────────────────────────────────────
+
+# Dependencies (re-installed in the image)
+**/node_modules
+.pnpm-store
+
+# Build outputs (re-built in the image)
+**/dist
+**/.next
+**/out
+**/.turbo
+**/*.tsbuildinfo
+.turbo
+
+# Prisma generated client (re-generated in the image)
+packages/db/generated
+
+# Secrets & env — NEVER copy into an image
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# VCS / CI
+.git
+.gitignore
+.github
+
+# Tests / coverage
+**/coverage
+**/.nyc_output
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea
+.vscode
+
+# Local docs/scratch not needed at build time
+**/*.log
+logs
+data
+.shipyard
+
+# Docker artifacts themselves
+**/Dockerfile
+**/.dockerignore
+infra/docker/docker-compose*.yml

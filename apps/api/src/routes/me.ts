@@ -10,6 +10,7 @@ import { z } from "zod";
 
 import { NotFoundError } from "@shipyard/core";
 
+import { callerTeamScope } from "../lib/rbac.js";
 import { toMembershipDto, toUserDto } from "../lib/serialize.js";
 
 import {
@@ -43,10 +44,17 @@ export const meRoutes: FastifyPluginAsyncZod = async (app) => {
     },
     async (request) => {
       const userId = request.auth!.userId;
+      // A team-scoped API token may only see its membership on the bound team,
+      // not the user's full cross-team membership list.
+      const tokenTeamId = callerTeamScope(request);
       const user = await app.prisma.user.findUnique({
         where: { id: userId },
         include: {
-          memberships: { include: { team: true }, orderBy: { createdAt: "asc" } },
+          memberships: {
+            ...(tokenTeamId ? { where: { teamId: tokenTeamId } } : {}),
+            include: { team: true },
+            orderBy: { createdAt: "asc" },
+          },
         },
       });
       if (!user) throw new NotFoundError("User", userId);

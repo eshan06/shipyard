@@ -142,37 +142,47 @@ export async function runCostTick(
 
   let written = 0;
   for (const preview of previews) {
-    const lastRecord = await db.costRecord.findFirst({
-      where: { previewId: preview.id },
-      orderBy: { periodEnd: "desc" },
-      select: { periodEnd: true },
-    });
-    const periodStart =
-      lastRecord?.periodEnd ?? new Date(now.getTime() - config.COST_INTERVAL_MS);
-    const periodMs = now.getTime() - periodStart.getTime();
-    if (periodMs <= 0) continue;
+    // Isolate each preview: a bad sample (e.g. a non-finite cost from a
+    // misbehaving driver, which roundUsd rejects by design) must not abort the
+    // whole tick and starve the remaining previews + the budget check below.
+    try {
+      const lastRecord = await db.costRecord.findFirst({
+        where: { previewId: preview.id },
+        orderBy: { periodEnd: "desc" },
+        select: { periodEnd: true },
+      });
+      const periodStart =
+        lastRecord?.periodEnd ?? new Date(now.getTime() - config.COST_INTERVAL_MS);
+      const periodMs = now.getTime() - periodStart.getTime();
+      if (periodMs <= 0) continue;
 
-    const stats = await orchestrator.collectStats(preview.id).catch(() => []);
-    const serviceCount = await db.service.count({
-      where: { previewId: preview.id, status: "HEALTHY" },
-    });
-    const usage = usageForPreview(stats, serviceCount, periodMs);
-    const breakdown = computeCostBreakdown(usage, rates);
+      const stats = await orchestrator.collectStats(preview.id).catch(() => []);
+      const serviceCount = await db.service.count({
+        where: { previewId: preview.id, status: "HEALTHY" },
+      });
+      const usage = usageForPreview(stats, serviceCount, periodMs);
+      const breakdown = computeCostBreakdown(usage, rates);
 
-    await db.costRecord.create({
-      data: {
-        previewId: preview.id,
-        periodStart,
-        periodEnd: now,
-        cpuSeconds: usage.cpuSeconds,
-        memoryGbHours: usage.memoryGbHours,
-        storageGbHours: usage.storageGbHours,
-        egressGb: usage.egressGb,
-        estimatedUsd: new Prisma.Decimal(breakdown.totalUsd),
-        computedAt: now,
-      },
-    });
-    written += 1;
+      await db.costRecord.create({
+        data: {
+          previewId: preview.id,
+          periodStart,
+          periodEnd: now,
+          cpuSeconds: usage.cpuSeconds,
+          memoryGbHours: usage.memoryGbHours,
+          storageGbHours: usage.storageGbHours,
+          egressGb: usage.egressGb,
+          estimatedUsd: new Prisma.Decimal(breakdown.totalUsd),
+          computedAt: now,
+        },
+      });
+      written += 1;
+    } catch (err) {
+      deps.logger.warn(
+        { err, previewId: preview.id },
+        "cost tick: skipping preview after error",
+      );
+    }
   }
 
   await checkBudgets(deps, now);

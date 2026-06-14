@@ -32,21 +32,116 @@ packages/db     Prisma schema, client, migrations, seed
 packages/core   Shared zod schemas, types, crypto, status machines
 packages/deploy-engine  Docker orchestration for preview stacks
 packages/config Shared tsconfig / eslint / prettier
+infra/docker    Local + production Docker Compose
+infra/k8s       Kubernetes manifests
+docs/           Engineering, deployment, and operations docs
 ```
 
 See [`ARCHITECTURE.md`](./ARCHITECTURE.md) for the full design.
 
-## Quickstart (local)
+## Quickstart (local development)
+
+### Prerequisites
+
+- **Node 22** (the repo pins `pnpm@9` via Corepack)
+- **pnpm 9** — `corepack enable && corepack prepare pnpm@9.15.9 --activate`
+- **Docker** (for local Postgres + Redis)
+
+### 1. Install & start infra
 
 ```bash
 pnpm install
-cp .env.example .env            # then fill in secrets
-pnpm infra:up                   # postgres + redis via docker
-pnpm db:generate && pnpm db:migrate && pnpm db:seed
-pnpm dev                        # web + api + worker
+pnpm infra:up                   # postgres + redis via docker compose
 ```
 
-Dashboard: http://localhost:3000 · API: http://localhost:4000
+### 2. Configure environment
+
+```bash
+cp .env.example .env
+```
+
+Generate the two required secrets and put them in `.env`:
+
+```bash
+openssl rand -base64 32         # → SECRETS_ENCRYPTION_KEY (32-byte base64)
+openssl rand -hex 32            # → SESSION_SECRET (≥ 32 chars)
+```
+
+Keep the dev-friendly defaults: `DEV_AUTH=true` (enables password-less login),
+`DEPLOY_DRIVER=mock` (no Docker daemon needed for previews), and a
+`GITHUB_WEBHOOK_SECRET` for the demo below. The `DATABASE_URL` / `REDIS_URL`
+defaults already match `pnpm infra:up`.
+
+### 3. Migrate & seed the database
+
+```bash
+pnpm db:generate                # generate the Prisma client
+pnpm db:migrate                 # apply migrations
+pnpm db:seed                    # rich demo data (team, projects, PRs, previews…)
+```
+
+### 4. Run the apps
+
+```bash
+pnpm dev                        # web + api + worker together (turbo)
+```
+
+…or run them individually in separate terminals:
+
+```bash
+pnpm --filter @shipyard/api dev       # http://localhost:4000  (OpenAPI at /docs)
+pnpm --filter @shipyard/worker dev
+pnpm --filter @shipyard/web dev       # http://localhost:3000
+```
+
+Dashboard: <http://localhost:3000> · API: <http://localhost:4000> ·
+API docs: <http://localhost:4000/docs>
+
+### 5. Log in
+
+With `DEV_AUTH=true`, log in as the seeded user **`alice@acme.dev`** via the
+dashboard's dev-login (or `POST /api/v1/auth/dev-login` with
+`{"email":"alice@acme.dev"}`).
+
+### 6. Demo: PR → live preview
+
+With the api + worker running and `GITHUB_WEBHOOK_SECRET` set, fire a signed
+GitHub `pull_request` webhook and watch the worker drive the new preview to
+`RUNNING` (mock driver):
+
+```bash
+GITHUB_WEBHOOK_SECRET=<your value> node scripts/e2e-webhook.mjs
+```
+
+It dev-logs-in, POSTs a signed `opened` webhook, then polls the previews API
+until the preview reports `RUNNING` with a URL. You'll see the same preview
+appear (and stream logs) live in the dashboard.
+
+## Health & API
+
+- `GET /healthz` — liveness (api)
+- `GET /readyz` — readiness; checks Postgres + Redis
+- `GET /docs` — OpenAPI / Swagger UI
+
+## Testing & checks
+
+```bash
+pnpm typecheck      # tsc --noEmit across the workspace
+pnpm lint           # eslint / next lint
+pnpm test           # vitest (unit + integration; needs postgres + redis up)
+pnpm build          # turbo build of all packages/apps
+```
+
+CI runs all of these on every push/PR — see
+[`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
+
+## Production
+
+To build container images and deploy with Docker Compose or Kubernetes, see
+[`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md). For operating the running system
+(health, scaling, backups, failure modes, secret rotation) see
+[`docs/RUNBOOK.md`](./docs/RUNBOOK.md). Contributors: see
+[`CONTRIBUTING.md`](./CONTRIBUTING.md).
 
 ## Status
 

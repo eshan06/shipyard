@@ -1,0 +1,58 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Shipyard ingress.
+#
+# Two hosts:
+#   shipyard.example.com      → web (dashboard). The browser calls the API
+#                               same-origin at /api/v1/*, which the Next server
+#                               rewrites to the in-cluster API Service — so no
+#                               public API host is strictly required for the UI.
+#   api.shipyard.example.com  → api directly. Needed for inbound GitHub webhooks
+#                               (POST /api/v1/webhooks/github), the OpenAPI docs
+#                               (/docs), and external API/token clients. This is
+#                               what PUBLIC_API_URL / the GitHub App webhook URL
+#                               should point at.
+#
+# Adjust `ingressClassName`, hostnames and TLS to your environment. The example
+# uses the ingress-nginx class and cert-manager for TLS; remove the annotations /
+# tls block if you terminate TLS elsewhere (e.g. a cloud LB).
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: shipyard
+  namespace: shipyard
+  labels:
+    app.kubernetes.io/part-of: shipyard
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    # SSE (live logs) needs buffering off + long read timeouts on the API host.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - shipyard.example.com
+        - api.shipyard.example.com
+      secretName: shipyard-tls
+  rules:
+    - host: shipyard.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shipyard-web
+                port:
+                  number: 3000
+    - host: api.shipyard.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: shipyard-api
+                port:
+                  number: 4000

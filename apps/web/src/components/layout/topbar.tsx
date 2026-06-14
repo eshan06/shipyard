@@ -1,7 +1,5 @@
 "use client";
 
-import * as React from "react";
-import { useRouter } from "next/navigation";
 import {
   Bell,
   Check,
@@ -10,8 +8,12 @@ import {
   Menu,
   Users,
 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import * as React from "react";
 import { toast } from "sonner";
 
+import { SidebarNav, Wordmark } from "@/components/layout/sidebar";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,12 +31,10 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { ThemeToggle } from "@/components/theme-toggle";
-import { SidebarNav, Wordmark } from "@/components/layout/sidebar";
 import { api } from "@/lib/api";
 import { useMe, useNotifications } from "@/lib/hooks";
-import { initials } from "@/lib/utils";
 import { relativeTime } from "@/lib/time";
+import { initials } from "@/lib/utils";
 
 import type { Membership, Notification } from "@/lib/api-types";
 

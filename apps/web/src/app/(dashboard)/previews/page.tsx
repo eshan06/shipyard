@@ -1,7 +1,5 @@
 "use client";
 
-import * as React from "react";
-import Link from "next/link";
 import {
   Boxes,
   ExternalLink,
@@ -9,11 +7,18 @@ import {
   GitPullRequest,
   Pin,
 } from "lucide-react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import * as React from "react";
+
+import {
+  PREVIEW_STATUS_DISPLAY,
+  type PreviewStatus,
+} from "@shipyard/core";
 
 import { PageHeader } from "@/components/page-header";
-import { StatusBadge } from "@/components/status-badge";
 import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/states";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -24,13 +29,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { usePreviews, useProjects } from "@/lib/hooks";
-import { initials } from "@/lib/utils";
 import { relativeTime } from "@/lib/time";
 
-import {
-  PREVIEW_STATUS_DISPLAY,
-  type PreviewStatus,
-} from "@shipyard/core";
 import type { Preview } from "@/lib/api-types";
 
 /** Sentinel select value meaning "no filter". */
@@ -116,8 +116,13 @@ function PreviewCard({ p }: { p: Preview }): React.JSX.Element {
  * states.
  */
 export default function PreviewsPage(): React.JSX.Element {
+  // Seed the project filter from the `?projectId=` query param so deep links
+  // from a project's "Previews" button land pre-filtered.
+  const searchParams = useSearchParams();
   const [status, setStatus] = React.useState<string>(ALL);
-  const [projectId, setProjectId] = React.useState<string>(ALL);
+  const [projectId, setProjectId] = React.useState<string>(
+    () => searchParams.get("projectId") ?? ALL,
+  );
 
   const previews = usePreviews({
     status: status === ALL ? undefined : (status as PreviewStatus),
@@ -205,28 +210,6 @@ export default function PreviewsPage(): React.JSX.Element {
           ))}
         </div>
       )}
-    </div>
-  );
-}
-
-/** Reviewer avatar stack (local to this page). */
-function ReviewerStack({
-  reviewers,
-}: {
-  reviewers: Array<{ login: string; avatarUrl: string | null }>;
-}): React.JSX.Element {
-  return (
-    <div className="flex -space-x-2">
-      {reviewers.slice(0, 5).map((r) => (
-        <Avatar key={r.login} className="size-7 border-2 border-background">
-          {r.avatarUrl ? (
-            <AvatarImage src={r.avatarUrl} alt={r.login} />
-          ) : null}
-          <AvatarFallback className="text-[10px]">
-            {initials(r.login)}
-          </AvatarFallback>
-        </Avatar>
-      ))}
     </div>
   );
 }

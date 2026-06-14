@@ -1,12 +1,12 @@
 "use client";
 
-import * as React from "react";
 import { usePathname } from "next/navigation";
+import * as React from "react";
 
 import { AuthGuard } from "@/components/auth-guard";
+import { NAV_ITEMS, isNavActive } from "@/components/layout/nav";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
-import { NAV_ITEMS, isNavActive } from "@/components/layout/nav";
 
 /** Derive a human page title from the current pathname. */
 function titleForPath(pathname: string): string {

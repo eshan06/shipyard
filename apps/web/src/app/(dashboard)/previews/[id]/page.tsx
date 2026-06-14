@@ -1,8 +1,5 @@
 "use client";
 
-import * as React from "react";
-import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   ExternalLink,
@@ -14,12 +11,15 @@ import {
   Square,
   Trash2,
 } from "lucide-react";
+import Link from "next/link";
+import { useParams, useRouter } from "next/navigation";
+import * as React from "react";
 import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LogViewer } from "@/components/log-viewer";
-import { StatusBadge } from "@/components/status-badge";
 import { ErrorState } from "@/components/states";
+import { StatusBadge } from "@/components/status-badge";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,12 +32,6 @@ import {
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
-import {
   Table,
   TableBody,
   TableCell,
@@ -45,6 +39,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { api, ApiError } from "@/lib/api";
 import {
   usePreview,
@@ -55,6 +55,7 @@ import {
   usePreviewServices,
 } from "@/lib/hooks";
 import { usePreviewStatus } from "@/lib/sse";
+import { absoluteTime, relativeTime } from "@/lib/time";
 import {
   cn,
   formatDuration,
@@ -62,7 +63,6 @@ import {
   initials,
   shortSha,
 } from "@/lib/utils";
-import { absoluteTime, relativeTime } from "@/lib/time";
 
 import type { PreviewDetail, Service } from "@/lib/api-types";
 

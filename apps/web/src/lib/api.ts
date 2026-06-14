@@ -17,8 +17,8 @@ import type {
   ApiToken,
   AuditLog,
   Build,
-  CostRecord,
   CostSummary,
+  CreatedApiToken,
   Deployment,
   EnvVar,
   ErrorResponse,
@@ -334,6 +334,22 @@ export const api = {
   /** List a team's API tokens. */
   listTeamTokens: (teamId: string): Promise<ListResponse<ApiToken>> =>
     request<ListResponse<ApiToken>>(`/teams/${teamId}/tokens`),
+  /**
+   * Mint a team API token. The raw secret is returned **exactly once** in
+   * `token`; only its hash/prefix are persisted server-side, so it can never be
+   * retrieved again.
+   */
+  createTeamToken: (
+    teamId: string,
+    body: { name: string; scopes?: string[]; expiresAt?: string },
+  ): Promise<CreatedApiToken> =>
+    request<CreatedApiToken>(`/teams/${teamId}/tokens`, {
+      method: "POST",
+      body: JSON.stringify(body),
+    }),
+  /** Revoke (delete) a team API token. */
+  revokeTeamToken: (teamId: string, tokenId: string): Promise<void> =>
+    request<void>(`/teams/${teamId}/tokens/${tokenId}`, { method: "DELETE" }),
 };
 
 /** The shape of the {@link api} client (handy for typing props/mocks). */

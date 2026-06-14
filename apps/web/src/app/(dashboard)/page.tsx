@@ -1,7 +1,5 @@
 "use client";
 
-import * as React from "react";
-import Link from "next/link";
 import {
   Activity,
   ArrowUpRight,
@@ -10,11 +8,13 @@ import {
   Rocket,
   TriangleAlert,
 } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import Link from "next/link";
+import * as React from "react";
+
 
 import { PageHeader } from "@/components/page-header";
-import { StatusBadge } from "@/components/status-badge";
 import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/states";
+import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -27,10 +27,11 @@ import {
   useDeployments,
   usePreviews,
 } from "@/lib/hooks";
-import { cn, formatUsd, shortSha } from "@/lib/utils";
 import { relativeTime } from "@/lib/time";
+import { cn, formatUsd, shortSha } from "@/lib/utils";
 
 import type { Deployment, Preview } from "@/lib/api-types";
+import type { LucideIcon } from "lucide-react";
 
 /** A single KPI stat card with an icon, value, and label. */
 function StatCard({

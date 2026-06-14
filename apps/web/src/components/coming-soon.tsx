@@ -1,10 +1,12 @@
 "use client";
 
 import * as React from "react";
-import type { LucideIcon } from "lucide-react";
+
 
 import { PageHeader } from "@/components/page-header";
 import { EmptyState } from "@/components/states";
+
+import type { LucideIcon } from "lucide-react";
 
 /** Props for {@link ComingSoon}. */
 export interface ComingSoonProps {

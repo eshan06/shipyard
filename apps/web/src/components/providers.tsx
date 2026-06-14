@@ -4,8 +4,8 @@ import * as React from "react";
 import { SWRConfig } from "swr";
 
 import { ThemeProvider } from "@/components/theme-provider";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/toaster";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 /**
  * Root client providers: theme (next-themes), Radix tooltips, the sonner toast

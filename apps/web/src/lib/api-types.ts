@@ -374,6 +374,17 @@ export interface ApiToken {
   createdAt: string;
 }
 
+/**
+ * The response from minting a token. `token` is the raw secret, returned
+ * **exactly once** at creation time and never persisted in plaintext.
+ */
+export interface CreatedApiToken {
+  /** The raw API token, shown once. Copy it now; it cannot be retrieved again. */
+  token: string;
+  /** The token's safe metadata (never includes the raw secret). */
+  apiToken: ApiToken;
+}
+
 /** A streamed log line (SSE `/deployments/:id/logs`). */
 export interface LogEvent {
   seq: number;

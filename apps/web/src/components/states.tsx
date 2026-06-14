@@ -1,12 +1,14 @@
 "use client";
 
-import * as React from "react";
 import { AlertTriangle, Inbox, RefreshCw } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
+import * as React from "react";
+
 
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+
+import type { LucideIcon } from "lucide-react";
 
 /** Props for {@link EmptyState}. */
 export interface EmptyStateProps {

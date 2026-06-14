@@ -1,13 +1,13 @@
 "use client";
 
-import * as React from "react";
 import { Pause, Play, Radio, Trash2 } from "lucide-react";
+import * as React from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDeploymentLogs, type StreamState } from "@/lib/sse";
-import { cn } from "@/lib/utils";
 import { logTime } from "@/lib/time";
+import { cn } from "@/lib/utils";
 
 import type { LogEvent } from "@/lib/api-types";
 

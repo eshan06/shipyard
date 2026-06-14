@@ -31,6 +31,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { ANALYTICS_EVENTS, flushAnalytics, trackEvent } from "@/lib/analytics";
 import { api } from "@/lib/api";
 import { useMe, useNotifications } from "@/lib/hooks";
 import { relativeTime } from "@/lib/time";
@@ -206,6 +207,10 @@ function UserMenu(): React.JSX.Element {
 
   const onLogout = async (): Promise<void> => {
     try {
+      // Record + flush while the session is still valid; after logout the
+      // telemetry route would 401.
+      trackEvent(ANALYTICS_EVENTS.signedOut);
+      await flushAnalytics();
       await api.logout();
       toast.success("Signed out");
       router.push("/login");

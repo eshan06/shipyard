@@ -17,6 +17,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { ANALYTICS_EVENTS, trackEvent } from "@/lib/analytics";
 import { api, ApiError } from "@/lib/api";
 
 /** Seeded demo accounts shown as login hints (from `packages/db/prisma/seed.ts`). */
@@ -44,6 +45,8 @@ export default function LoginPage(): React.JSX.Element {
     setSubmitting(true);
     try {
       const user = await api.devLogin(email.trim());
+      // Buffered now; flushed once the authenticated app mounts after redirect.
+      trackEvent(ANALYTICS_EVENTS.signedIn, { method: "dev" });
       toast.success(`Welcome back, ${user.name ?? user.email}`);
       router.push("/");
     } catch (err) {

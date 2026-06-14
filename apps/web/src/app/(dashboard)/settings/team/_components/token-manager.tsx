@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ANALYTICS_EVENTS, trackEvent } from "@/lib/analytics";
 import { api, ApiError } from "@/lib/api";
 import { absoluteTime, relativeTime } from "@/lib/time";
 
@@ -85,6 +86,7 @@ function CreateTokenDialog({
       });
       setRawToken(result.token);
       onCreated();
+      trackEvent(ANALYTICS_EVENTS.apiTokenCreated, { teamId });
       toast.success(`Created ${result.apiToken.name}`);
     } catch (err) {
       toast.error(errMessage(err, "Failed to create token"));
@@ -293,6 +295,7 @@ export function TokenManager({
     if (!revoking) return;
     try {
       await api.revokeTeamToken(teamId, revoking.id);
+      trackEvent(ANALYTICS_EVENTS.apiTokenRevoked, { teamId });
       toast.success(`Revoked ${revoking.name}`);
       void tokens.mutate();
     } catch (err) {

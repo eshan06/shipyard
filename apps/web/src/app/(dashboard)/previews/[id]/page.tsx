@@ -45,6 +45,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
+import { ANALYTICS_EVENTS, trackEvent } from "@/lib/analytics";
 import { api, ApiError } from "@/lib/api";
 import {
   usePreview,
@@ -129,6 +130,14 @@ function PreviewHeader({
 
   const url = liveUrl ?? preview.url;
 
+  /** Maps an action label to its product-analytics event name. */
+  const ACTION_EVENTS: Record<string, string> = {
+    pin: ANALYTICS_EVENTS.previewPinned,
+    redeploy: ANALYTICS_EVENTS.previewRedeployed,
+    stop: ANALYTICS_EVENTS.previewStopped,
+    destroy: ANALYTICS_EVENTS.previewDestroyed,
+  };
+
   /** Run a preview action with optimistic refresh + toasts. */
   const run = async (
     label: string,
@@ -138,6 +147,8 @@ function PreviewHeader({
     setBusy(label);
     try {
       await fn();
+      const event = ACTION_EVENTS[label];
+      if (event) trackEvent(event, { previewId: preview.id });
       toast.success(success);
       onRefresh();
     } catch (err) {

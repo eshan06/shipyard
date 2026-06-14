@@ -314,7 +314,17 @@ function projectConfigFrom(project: LoadedProject): ProjectConfig {
       ? (project.config as Record<string, unknown>)
       : {};
   const config: ProjectConfig = { rootDirectory: project.rootDirectory };
-  if (typeof raw.composeFile === "string") config.composeFile = raw.composeFile;
+  // `composeFile` is expected to be inline compose YAML *content*. Project
+  // configs commonly store a file *path* (e.g. "infra/docker-compose.yml")
+  // instead — in that case (and whenever we have no checked-out repo to read,
+  // as with the mock driver) we skip it and let the planner synthesize a
+  // sensible default stack (web/api + postgres + redis) from the framework.
+  if (
+    typeof raw.composeFile === "string" &&
+    /\n|services\s*:/.test(raw.composeFile)
+  ) {
+    config.composeFile = raw.composeFile;
+  }
   if (typeof raw.webDockerfile === "string")
     config.webDockerfile = raw.webDockerfile;
   if (typeof raw.apiDockerfile === "string")

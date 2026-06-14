@@ -16,7 +16,7 @@
  */
 
 import { Worker, type Job } from "bullmq";
-import type { PreviewOrchestrator } from "@shipyard/deploy-engine";
+
 import {
   DestroyJobSchema,
   QUEUE,
@@ -24,11 +24,15 @@ import {
   type DestroyJob,
   type DestroyReason,
 } from "@shipyard/core";
-import { type PrismaClient, type PreviewStatus } from "@shipyard/db";
-import type { Logger } from "pino";
-import type { WorkerConfig } from "../config.js";
+
+
 import { bullConnection, type WorkerConnection } from "../connection.js";
+
+import type { WorkerConfig } from "../config.js";
 import type { EventPublisher } from "../events.js";
+import type { PrismaClient, PreviewStatus } from "@shipyard/db";
+import type { PreviewOrchestrator } from "@shipyard/deploy-engine";
+import type { Logger } from "pino";
 
 /** Dependencies injected into {@link processDestroyJob} and the worker. */
 export interface DestroyWorkerDeps {
@@ -86,36 +90,45 @@ export async function processDestroyJob(
   }
 
   const teamId = await teamIdForProject(db, preview.projectId);
+  const terminal = TERMINAL_REASONS.has(job.reason);
 
-  // ── DESTROYING ──────────────────────────────────────────────────────────────
-  await transitionPreview(db, events, preview.id, preview.status, "DESTROYING", {
-    projectId: preview.projectId,
-    teamId,
-  });
-
-  try {
-    await orchestrator.destroy(preview.id);
-  } catch (error) {
-    log.error({ err: error }, "orchestrator destroy failed");
-    throw error;
+  if (terminal) {
+    // Full teardown: RUNNING/… → DESTROYING → orchestrator.destroy → DESTROYED.
+    await transitionPreview(db, events, preview.id, preview.status, "DESTROYING", {
+      projectId: preview.projectId,
+      teamId,
+    });
+    try {
+      await orchestrator.destroy(preview.id);
+    } catch (error) {
+      log.error({ err: error }, "orchestrator destroy failed");
+      throw error;
+    }
+    await stopServiceRows(db, preview.id);
+    await transitionPreview(db, events, preview.id, "DESTROYING", "DESTROYED", {
+      projectId: preview.projectId,
+      teamId,
+      destroyedAt: new Date(),
+    });
+    log.info({ reason: job.reason }, "preview destroyed");
+    return;
   }
 
-  // Mark all of the preview's service rows STOPPED.
-  await db.service.updateMany({
-    where: { previewId: preview.id },
-    data: { status: "STOPPED", containerId: null },
-  });
-
-  // ── Final state by reason ─────────────────────────────────────────────────
-  const terminal = TERMINAL_REASONS.has(job.reason);
-  const finalStatus: PreviewStatus = terminal ? "DESTROYED" : "STOPPED";
-  await transitionPreview(db, events, preview.id, "DESTROYING", finalStatus, {
+  // Idle stop: park the preview at STOPPED (resumable) via orchestrator.stop.
+  // Note: the preview state machine forbids DESTROYING → STOPPED, so an idle
+  // stop intentionally does NOT pass through DESTROYING.
+  try {
+    await orchestrator.stop(preview.id);
+  } catch (error) {
+    log.error({ err: error }, "orchestrator stop failed");
+    throw error;
+  }
+  await stopServiceRows(db, preview.id);
+  await transitionPreview(db, events, preview.id, preview.status, "STOPPED", {
     projectId: preview.projectId,
     teamId,
-    destroyedAt: terminal ? new Date() : undefined,
   });
-
-  log.info({ reason: job.reason, finalStatus }, "preview torn down");
+  log.info({ reason: job.reason }, "preview stopped (idle)");
 }
 
 /**
@@ -149,6 +162,17 @@ export function createDestroyWorker(deps: CreateDestroyWorkerDeps): Worker {
 // ─────────────────────────────────────────────────────────────────────────────
 // Internals
 // ─────────────────────────────────────────────────────────────────────────────
+
+/** Mark every `Service` row of a preview STOPPED, clearing the container id. */
+async function stopServiceRows(
+  db: PrismaClient,
+  previewId: string,
+): Promise<void> {
+  await db.service.updateMany({
+    where: { previewId },
+    data: { status: "STOPPED", containerId: null },
+  });
+}
 
 /** Resolve the owning team id for a project (for the firehose payload). */
 async function teamIdForProject(

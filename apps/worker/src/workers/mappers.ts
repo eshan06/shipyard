@@ -11,15 +11,15 @@
  */
 
 import type {
-  PreviewState,
-  ServiceKind,
-  ServiceState,
-} from "@shipyard/deploy-engine";
-import type {
   PreviewStatus,
   ServiceStatus,
   ServiceType,
 } from "@shipyard/db";
+import type {
+  PreviewState,
+  ServiceKind,
+  ServiceState,
+} from "@shipyard/deploy-engine";
 
 /** Map an engine {@link ServiceKind} onto the Prisma `ServiceType` enum. */
 export function serviceTypeFromKind(kind: ServiceKind): ServiceType {

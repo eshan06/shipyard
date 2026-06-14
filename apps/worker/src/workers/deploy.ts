@@ -26,6 +26,14 @@
  */
 
 import { Worker, type Job } from "bullmq";
+
+import {
+  DeployJobSchema,
+  QUEUE,
+  canTransitionDeployment,
+  canTransitionPreview,
+  type DeployJob,
+} from "@shipyard/core";
 import {
   ComposePlanner,
   type DeployResult,
@@ -36,27 +44,23 @@ import {
   type ProjectConfig,
   type ServiceRuntime,
 } from "@shipyard/deploy-engine";
-import {
-  DeployJobSchema,
-  QUEUE,
-  canTransitionDeployment,
-  canTransitionPreview,
-  type DeployJob,
-} from "@shipyard/core";
-import {
-  type DeploymentStatus,
-  type PrismaClient,
-  type PreviewStatus,
-} from "@shipyard/db";
-import type { Logger } from "pino";
-import type { WorkerConfig } from "../config.js";
+
 import { bullConnection, type WorkerConnection } from "../connection.js";
-import type { EventPublisher } from "../events.js";
+
 import { logSourceForPhase, mapLogLevel } from "./log-mapping.js";
 import {
   serviceStatusFromState,
   serviceTypeFromKind,
 } from "./mappers.js";
+
+import type { WorkerConfig } from "../config.js";
+import type { EventPublisher } from "../events.js";
+import type {
+  DeploymentStatus,
+  PrismaClient,
+  PreviewStatus,
+} from "@shipyard/db";
+import type { Logger } from "pino";
 
 /** Dependencies injected into {@link processDeployJob} and the worker. */
 export interface DeployWorkerDeps {

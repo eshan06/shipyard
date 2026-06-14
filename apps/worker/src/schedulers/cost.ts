@@ -13,17 +13,21 @@
  */
 
 import { Worker, type Job } from "bullmq";
+
 import {
   QUEUE,
   computeCostBreakdown,
   type CostRates,
   type UsageSample,
 } from "@shipyard/core";
-import type { ServiceStatsSample } from "@shipyard/deploy-engine";
 import { Prisma, type PrismaClient } from "@shipyard/db";
-import type { Logger } from "pino";
-import type { WorkerConfig } from "../config.js";
+
 import { bullConnection, type WorkerConnection } from "../connection.js";
+
+import type { WorkerConfig } from "../config.js";
+import type { ServiceStatsSample } from "@shipyard/deploy-engine";
+import type { Logger } from "pino";
+
 
 /** Seconds per millisecond divisor for ms → hours. */
 const MS_PER_HOUR = 3_600_000;

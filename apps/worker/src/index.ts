@@ -12,17 +12,19 @@
  */
 
 import { Queue } from "bullmq";
+
 import { QUEUE } from "@shipyard/core";
 import { prisma } from "@shipyard/db";
+
 import { loadConfig } from "./config.js";
 import { bullConnection, closeConnection, createConnection } from "./connection.js";
 import { createEventPublisher } from "./events.js";
 import { createLogger } from "./logger.js";
 import { createOrchestrator } from "./orchestrator.js";
-import { createDeployWorker } from "./workers/deploy.js";
-import { createDestroyWorker } from "./workers/destroy.js";
 import { createCleanupWorker } from "./schedulers/cleanup.js";
 import { createCostWorker } from "./schedulers/cost.js";
+import { createDeployWorker } from "./workers/deploy.js";
+import { createDestroyWorker } from "./workers/destroy.js";
 
 /** Boot the worker process. Resolves once everything is started. */
 async function main(): Promise<void> {

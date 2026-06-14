@@ -25,8 +25,9 @@ import {
   type PreviewStatusMessage,
 } from "@shipyard/core";
 import { prisma, type LogLevel, type LogSource } from "@shipyard/db";
-import type { Logger } from "pino";
+
 import type { WorkerConnection } from "./connection.js";
+import type { Logger } from "pino";
 
 /** A log line to record + publish, before a `seq` is assigned. */
 export interface LogEventInput {

@@ -11,17 +11,21 @@
  * @module
  */
 
-import { Queue, Worker, type Job } from "bullmq";
+import { Worker, type Job, type Queue } from "bullmq";
+
 import {
   DEFAULT_JOB_OPTIONS,
   DestroyJobSchema,
   QUEUE,
   type DestroyReason,
 } from "@shipyard/core";
+
+import { bullConnection, type WorkerConnection } from "../connection.js";
+
+import type { WorkerConfig } from "../config.js";
 import type { PrismaClient, PreviewStatus, PullRequestState } from "@shipyard/db";
 import type { Logger } from "pino";
-import type { WorkerConfig } from "../config.js";
-import { bullConnection, type WorkerConnection } from "../connection.js";
+
 
 /**
  * The minimal projection of a preview the cleanup scan reasons about. Mirrors

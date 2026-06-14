@@ -8,8 +8,8 @@
  * @module
  */
 
-import type { DeployPhase } from "@shipyard/deploy-engine";
 import type { LogLevel, LogSource } from "@shipyard/db";
+import type { DeployPhase } from "@shipyard/deploy-engine";
 
 /**
  * Map a {@link DeployPhase} to the {@link LogSource} bucket it belongs in.

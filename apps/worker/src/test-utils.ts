@@ -12,12 +12,13 @@
  */
 
 import { pino, type Logger } from "pino";
-import type { PrismaClient } from "@shipyard/db";
+
 import type {
   EventPublisher,
   LogEventInput,
   PreviewStatusEventInput,
 } from "./events.js";
+import type { PrismaClient } from "@shipyard/db";
 
 /** A row in the fake store: any object with a string `id`. */
 export type Row = Record<string, unknown> & { id: string };

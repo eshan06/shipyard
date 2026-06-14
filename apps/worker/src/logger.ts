@@ -10,6 +10,7 @@
  */
 
 import { pino, type Logger } from "pino";
+
 import type { WorkerConfig } from "./config.js";
 
 /**

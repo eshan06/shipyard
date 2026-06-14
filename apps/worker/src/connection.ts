@@ -11,9 +11,10 @@
  * @module
  */
 
-import type { ConnectionOptions } from "bullmq";
 import { Redis } from "ioredis";
+
 import type { WorkerConfig } from "./config.js";
+import type { ConnectionOptions } from "bullmq";
 
 /**
  * The shared ioredis client reused across all queues/workers (keeps the

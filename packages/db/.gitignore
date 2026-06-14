@@ -1,0 +1,6 @@
+# Prisma's machine-generated client (produced by `prisma generate`).
+# Regenerate locally/CI; never commit.
+generated/
+
+# Build output
+dist/

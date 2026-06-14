@@ -1,87 +1,76 @@
 # Shipyard — Build Progress & Backlog
 
 > Durable state for the autonomous build. Updated at the end of every work wave.
-> If you are an agent resuming work: read this top-to-bottom, pick the next
-> unchecked item in the lowest in-progress phase, and continue.
+> If you are an agent resuming work: read this top-to-bottom, then read
+> `docs/ENGINEERING.md` and the memory note `fast-fs-build-location`, and
+> continue the next unchecked item.
 
-**Last updated:** 2026-06-14 (wave 0 — foundation)
-**Current phase:** Phase 1 — Foundation & shared packages
+**Last updated:** 2026-06-14 (wave 1 — Phase 1 verified green; app scaffolding)
+**Current phase:** Phase 2 — Control-plane API
+
+## CRITICAL build note
+
+Build on the **fast overlay fs** `/home/agent/build`, NOT the OneDrive mount
+(`/c/Users/.../shipyard`), which is ~300x slower for installs/builds. `cd
+/home/agent/build` for everything. Deliver by rsyncing source back to OneDrive at
+each checkpoint (see `fast-fs-build-location` memory). Run
+`bash scripts/strip-write-artifacts.sh` after every write wave (an editor tool
+intermittently appends a `</content>` line) before typecheck/build.
 
 ## Status legend
 
 - [ ] todo  ·  [~] in progress  ·  [x] done  ·  [!] blocked (needs user)
 
-## Decisions log
+## Blocked-on-user (return handoff)
 
-- 2026-06-14: Monorepo = pnpm + turborepo. Stack per `ARCHITECTURE.md`.
-- 2026-06-14: Domain model committed in `packages/db/prisma/schema.prisma`.
-
-## Blocked-on-user (collect here for the return handoff)
-
-- [!] GitHub App creation (App ID, private key, webhook secret) — needed for real
-      PR webhook flow. Mock provider used until then.
+- [!] GitHub App (App ID, private key, webhook secret) — real PR webhook flow.
 - [!] GitHub OAuth app (login) client id/secret.
-- [!] Production Docker host / Kubernetes target for real preview deploys.
+- [!] Production Docker host / k8s target for real preview deploys.
+- [!] Reinstall deps on the user's machine (`pnpm install`) — node_modules is
+      built only on the sandbox fast fs, not synced to OneDrive.
 
 ---
 
-## Phase 0 — Repo foundation  ✅
+## Phase 0 — Repo foundation  [x]
 
-- [x] git init, monorepo scaffold (package.json, pnpm-workspace, turbo, tsconfig)
-- [x] infra docker-compose (postgres + redis)
-- [x] Prisma domain model
-- [x] ARCHITECTURE.md, PROGRESS.md
+- [x] monorepo scaffold, infra docker-compose, Prisma model, ARCHITECTURE.md
 
-## Phase 1 — Foundation & shared packages
+## Phase 1 — Foundation & shared packages  [x]  (GREEN: 118 tests pass)
 
-- [ ] `packages/config` — shared tsconfig/eslint/prettier presets
-- [ ] `packages/db` — client export, migrations, seed script, env crypto helpers
-- [ ] `packages/core` — zod schemas, DTOs, domain types, status machines, errors
-- [ ] `packages/deploy-engine` — dockerode wrapper, compose planner, teardown
-- [ ] Root tooling: eslint, prettier, vitest config, CI workflow
+- [x] `packages/config` — tsconfig/eslint/prettier presets (+ tests)
+- [x] `packages/core` — zod schemas, DTOs, status machines, crypto, cost, ids,
+      errors, Result, and `jobs.ts` (queue/channel contracts) (54 tests)
+- [x] `packages/db` — Prisma client singleton, seed (rich demo data) (7 tests)
+- [x] `packages/deploy-engine` — planner, docker driver, orchestrator, mock (44 tests)
+- [x] Root tooling: eslint, prettier, vitest workspace, CI workflow
+- [x] `.env.example`, `docs/ENGINEERING.md` (cross-cutting contracts)
+- [x] App `package.json` + tsconfig/tsup/eslint/vitest scaffolding (api, worker)
 
-## Phase 2 — Control-plane API (`apps/api`)
+## Phase 2 — Control-plane API (`apps/api`)  [~]
 
-- [ ] Fastify bootstrap, config loader, pino logging, error handling
-- [ ] Auth: session + GitHub OAuth, ApiToken auth, RBAC guards
-- [ ] Resource routes: teams, projects, PRs, previews, deployments, builds,
-      services, env vars/secrets, seeds, reviewers, costs, audit, tokens
-- [ ] GitHub webhook ingestion (signature verify, idempotency, enqueue)
-- [ ] Job enqueue integration (BullMQ producers)
-- [ ] SSE/WS live logs + status streams
-- [ ] OpenAPI spec + zod validation, healthcheck, metrics
+- [ ] Foundation: config (zod env), server factory, plugins (prisma, redis,
+      queues, auth, rbac, rate-limit, swagger, sse), error handler, route
+      registry + stubs, health route, auth routes, teams reference router
+- [ ] Feature routers + services: projects, PRs, previews (+actions),
+      deployments, builds, services, env vars/secrets, seeds, reviews, costs,
+      audit, tokens, notifications, webhooks (GitHub), SSE log/status streams
+- [ ] OpenAPI, integration tests, adversarial security review + fixes
 
 ## Phase 3 — Workers (`apps/worker`)
 
-- [ ] BullMQ setup, queues, schedulers
-- [ ] deploy worker (build → start stack → seed → health → RUNNING)
-- [ ] cleanup worker (auto-stop idle, destroy closed-PR TTL)
-- [ ] cost worker (sample stats → CostRecord → budget alerts)
-- [ ] log relay (container logs → LogChunk + Redis pub/sub)
+- [ ] BullMQ setup; deploy / destroy-cleanup / cost / log-relay workers
+      (deploy-engine Mock + Docker drivers); tests; review
 
 ## Phase 4 — Dashboard (`apps/web`)
 
-- [ ] App shell, auth, theming, design system (shadcn/ui)
-- [ ] Previews list + detail (status, url, services, reviewers)
-- [ ] Deployment status + live build/runtime logs viewer
-- [ ] Failed builds view (error summaries, retry)
-- [ ] Costs dashboard (per preview/project/team, budgets)
-- [ ] Env vars & secrets management UI
-- [ ] Projects & team settings, members, tokens
-- [ ] Empty/loading/error states, responsive, a11y
+- [ ] Design system + shell; previews list/detail; deployments + live logs;
+      failed builds; costs; env/secrets UI; projects/team settings; states/a11y
 
-## Phase 5 — Integration, tests, hardening
+## Phase 5 — Integration, tests, hardening, demo data
 
-- [ ] End-to-end mock provider flow (PR → preview → destroy) working locally
-- [ ] Unit + integration tests across packages (vitest)
-- [ ] Seed/demo data for a believable dashboard
-- [ ] Security pass (secret handling, authz, input validation, rate limits)
-- [ ] Docs: README quickstart, CONTRIBUTING, API docs, runbook
-- [ ] CI green (lint, typecheck, test, build)
+- [ ] E2E mock flow (PR→preview→destroy) vs real Postgres+Redis; security pass;
+      docs (README/CONTRIBUTING/runbook); CI green
 
 ## Phase 6 — Production readiness
 
-- [ ] Dockerfiles for web/api/worker, prod compose, k8s manifests
-- [ ] Observability (metrics, health, tracing hooks)
-- [ ] Migration/runbook, backup notes, scaling notes
-- [ ] Final adversarial review wave
+- [ ] Dockerfiles, prod compose, k8s, observability, runbook, final review

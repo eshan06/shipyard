@@ -1,0 +1,52 @@
+{
+  "name": "@shipyard/config",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared dev tooling presets (tsconfig, eslint, prettier) for the Shipyard monorepo",
+  "type": "module",
+  "license": "UNLICENSED",
+  "files": [
+    "dist",
+    "tsconfig",
+    "prettier.js"
+  ],
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./eslint": {
+      "types": "./dist/eslint.d.ts",
+      "import": "./dist/eslint.js"
+    },
+    "./prettier": {
+      "types": "./dist/prettier.d.ts",
+      "import": "./dist/prettier.js"
+    },
+    "./tsconfig/base": "./tsconfig/tsconfig.base.json",
+    "./tsconfig/nextjs": "./tsconfig/tsconfig.nextjs.json",
+    "./tsconfig/node": "./tsconfig/tsconfig.node.json",
+    "./tsconfig/*": "./tsconfig/*.json"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint ."
+  },
+  "dependencies": {
+    "@eslint/js": "^9.17.0",
+    "eslint": "^9.17.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-import": "^2.31.0",
+    "globals": "^15.14.0",
+    "prettier": "^3.4.2",
+    "typescript-eslint": "^8.18.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  }
+}

@@ -1,7 +1,7 @@
 # Shipyard — Build Progress & Backlog
 
-**Status:** Phases 0–6 complete. Near production-ready. See `docs/RETURN_HANDOFF.md`.
-**Last updated:** 2026-06-14 (final wave — review fixes + production hardening)
+**Status:** Phases 0–7 complete. Near production-ready. See `docs/RETURN_HANDOFF.md`.
+**Last updated:** 2026-06-15 (polish track — legal pack, analytics seam, onboarding)
 
 ## Build note (for resuming agents)
 Moving off OneDrive did NOT fix the filesystem: the working tree
@@ -42,8 +42,23 @@ gone. See the `build-on-fast-fs-mirror` memory.
 - [x] Phase 6 — Dockerfiles (api/worker/web, built+smoke-tested), prod compose,
       k8s manifests, DEPLOYMENT.md, RUNBOOK.md, README quickstart, CONTRIBUTING,
       final adversarial review wave + fixes. RETURN_HANDOFF.md for the user.
+- [x] Phase 7 — Polish track (2026-06-15):
+      • Counsel-ready legal pack in `legal/` (ToS, Privacy, DPA, AUP, Subprocessors,
+        Cookie, DMCA + README + COUNSEL_REVIEW_CHECKLIST) — tailored to Shipyard,
+        flagged DRAFT/[[placeholders]]/⚠️ COUNSEL. **Lawyer review required before use.**
+      • Product analytics: the `trackEvent` seam (web) → `POST /api/v1/telemetry`
+        (auth-required, server-stamped identity) → pluggable `app.analytics` sink
+        (`ANALYTICS_DRIVER=log|http|posthog`, default `log` = durable structured events).
+        Instrumented login/logout, page views, preview actions, token create/revoke.
+      • First-run onboarding checklist on the Overview page (derives steps from live
+        data; dismissible; emits onboarding events) + `docs/ONBOARDING.md`.
+      • Added the web test suite (vitest config + 11 tests) — fixes the previously-red
+        web `test` gate. History rewritten to drop the Claude co-author trailer.
 
 ## Blocked-on-user (return handoff — see docs/RETURN_HANDOFF.md)
+- [!] **Push to GitHub `proofline` repo** — sandbox GitHub creds not injected for
+      this sandbox; needs `sbx secret set claude-shipyard-1 github -t "$(gh auth token)"`
+      on the host + the exact GitHub owner/username. History is co-author-clean & ready.
 - [!] `pnpm install` on your machine (node_modules not synced).
 - [!] GitHub App (App ID/private key/webhook secret) for real PR webhooks.
 - [!] GitHub OAuth app (client id/secret) for dashboard login; set DEV_AUTH=false.

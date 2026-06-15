@@ -56,9 +56,8 @@ gone. See the `build-on-fast-fs-mirror` memory.
         web `test` gate. History rewritten to drop the Claude co-author trailer.
 
 ## Blocked-on-user (return handoff — see docs/RETURN_HANDOFF.md)
-- [!] **Push to GitHub `proofline` repo** — sandbox GitHub creds not injected for
-      this sandbox; needs `sbx secret set claude-shipyard-1 github -t "$(gh auth token)"`
-      on the host + the exact GitHub owner/username. History is co-author-clean & ready.
+- [x] **Pushed to https://github.com/eshan06/shipyard** (private, 2026-06-15) —
+      co-author-clean history; only `main` pushed (backup tag kept local).
 - [!] `pnpm install` on your machine (node_modules not synced).
 - [!] GitHub App (App ID/private key/webhook secret) for real PR webhooks.
 - [!] GitHub OAuth app (client id/secret) for dashboard login; set DEV_AUTH=false.

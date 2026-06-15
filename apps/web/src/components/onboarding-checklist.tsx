@@ -105,7 +105,11 @@ export function OnboardingChecklist(): React.JSX.Element | null {
     projectEnv.data !== undefined ||
     projectEnv.error !== undefined;
   const dataReady =
-    !!me.data && !!projects.data && previewsSettled && tokensSettled && envSettled;
+    Boolean(me.data) &&
+    Boolean(projects.data) &&
+    previewsSettled &&
+    tokensSettled &&
+    envSettled;
 
   // Emit onboarding analytics only for GENUINE in-session transitions. We
   // snapshot the starting state once every signal has settled — so an

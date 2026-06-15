@@ -267,7 +267,7 @@ async function seedTeam(): Promise<{ id: string }> {
       avatarUrl: "https://avatars.githubusercontent.com/acme-inc?v=4",
       budgetUsdMonthly: new Prisma.Decimal("750.00"),
       createdAt: ago(150 * DAY),
-      updatedAt: ago(1 * DAY),
+      updatedAt: ago(DAY),
     },
     update: {
       name: "Acme",
@@ -338,7 +338,7 @@ async function seedStorefrontProject(teamId: string): Promise<{ id: string }> {
       destroyTtlMinutes: 60,
       isArchived: false,
       createdAt: ago(140 * DAY),
-      updatedAt: ago(1 * DAY),
+      updatedAt: ago(DAY),
     },
     update: { name: "Storefront", framework: "next", config },
   });
@@ -375,7 +375,7 @@ async function seedPaymentsProject(teamId: string): Promise<{ id: string }> {
       destroyTtlMinutes: 30,
       isArchived: false,
       createdAt: ago(110 * DAY),
-      updatedAt: ago(1 * DAY),
+      updatedAt: ago(DAY),
     },
     update: { name: "Payments API", framework: "node", config },
   });
@@ -1572,7 +1572,7 @@ async function seedReviews(): Promise<void> {
     { previewKey: "sf_412", reviewerKey: "dave", state: ReviewState.PENDING, updatedAgoMs: 2 * HOUR },
     { previewKey: "sf_409", reviewerKey: "alice", state: ReviewState.COMMENTED, updatedAgoMs: 3 * HOUR },
     { previewKey: "pa_233", reviewerKey: "alice", state: ReviewState.APPROVED, updatedAgoMs: 30 * MINUTE },
-    { previewKey: "pa_233", reviewerKey: "dave", state: ReviewState.PENDING, updatedAgoMs: 1 * HOUR },
+    { previewKey: "pa_233", reviewerKey: "dave", state: ReviewState.PENDING, updatedAgoMs: HOUR },
     { previewKey: "pa_236", reviewerKey: "bob", state: ReviewState.PENDING, updatedAgoMs: 15 * MINUTE },
     { previewKey: "pa_230", reviewerKey: "carol", state: ReviewState.CHANGES_REQUESTED, updatedAgoMs: 65 * MINUTE },
     { previewKey: "sf_401", reviewerKey: "erin", state: ReviewState.DISMISSED, updatedAgoMs: 25 * HOUR },

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 
-import Docker from "dockerode";
 
 import {
   ComposePlanner,
@@ -27,6 +26,8 @@ import {
   type ServicePlan,
   type ServiceState,
 } from "./index.js";
+
+import type Docker from "dockerode";
 
 /**
  * Unit tests for the deploy engine's pure, deterministic logic: the dependency

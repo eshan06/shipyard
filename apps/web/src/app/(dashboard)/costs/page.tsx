@@ -1,270 +1,321 @@
 "use client";
 
-import { CircleDollarSign, FolderGit2, TriangleAlert, Users } from "lucide-react";
+import {
+  Activity,
+  CircleDollarSign,
+  Folder,
+  TrendingUp,
+  Users,
+} from "lucide-react";
 import * as React from "react";
 
-import { PageHeader } from "@/components/page-header";
-import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/states";
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { AreaChart, HBars, StatCard } from "@/components/sy";
 import { useCostSummary } from "@/lib/hooks";
 import { absoluteTime } from "@/lib/time";
-import { cn, formatUsd } from "@/lib/utils";
-
-import { CostByProjectChart, CostOverTimeChart } from "./_components/charts";
+import { formatUsd } from "@/lib/utils";
 
 import type { CostSummary } from "@/lib/api-types";
-import type { LucideIcon } from "lucide-react";
 
-/** A compact KPI card for a single headline metric. */
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  hint,
-  tone = "default",
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: React.ReactNode;
-  hint?: string;
-  tone?: "default" | "warning" | "danger";
-}): React.JSX.Element {
-  const toneClass =
-    tone === "danger"
-      ? "text-destructive"
-      : tone === "warning"
-        ? "text-warning"
-        : "text-foreground";
-  return (
-    <Card>
-      <CardContent className="flex items-start justify-between gap-4 p-5">
-        <div className="min-w-0 space-y-1">
-          <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-            {label}
-          </p>
-          <p className={cn("text-2xl font-semibold tracking-tight", toneClass)}>
-            {value}
-          </p>
-          {hint ? (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          ) : null}
-        </div>
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-          <Icon className="size-4" />
-        </div>
-      </CardContent>
-    </Card>
-  );
+/**
+ * Format a `YYYY-MM-DD` day key as a compact `Mon D` axis label (e.g. `Jun 3`).
+ * The {@link AreaChart} strips a leading `Jun ` to render just the day number,
+ * matching the design's terse axis.
+ */
+function dayLabel(date: string): string {
+  const parsed = new Date(`${date}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return parsed.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
 }
 
-/** A per-team budget row with a usage bar. */
-function TeamBudgetRow({
+/** A single per-team budget row with a usage bar and healthy/over caption. */
+function TeamBudget({
   team,
 }: {
   team: CostSummary["teams"][number];
 }): React.JSX.Element {
-  const pct =
-    team.budgetUsedFraction != null
-      ? Math.min(100, Math.round(team.budgetUsedFraction * 100))
+  const frac = team.budgetUsedFraction ?? 0;
+  const pct = Math.min(100, Math.max(0, frac * 100));
+  const remaining =
+    team.budgetUsdMonthly != null
+      ? Math.max(0, team.budgetUsdMonthly - team.spendUsd)
       : null;
 
   return (
-    <div className="space-y-2 py-3">
-      <div className="flex items-center justify-between gap-3">
-        <span className="inline-flex items-center gap-2 text-sm font-medium">
-          {team.teamName}
-          {team.overBudget ? (
-            <Badge variant="destructive" className="gap-1">
-              <TriangleAlert className="size-3" />
-              Over budget
-            </Badge>
-          ) : null}
-        </span>
-        <span className="text-sm text-muted-foreground">
-          <span className="font-medium text-foreground">
-            {formatUsd(team.spendUsd)}
-          </span>
-          {team.budgetUsdMonthly != null ? (
-            <> {" / "}{formatUsd(team.budgetUsdMonthly)}</>
-          ) : (
-            <> {" "}(no budget)</>
-          )}
+    <div className="bud" style={{ marginBottom: 16 }}>
+      <div className="bud-head">
+        <span className="bud-name">{team.teamName}</span>
+        <span className="bud-val">
+          <b>{formatUsd(team.spendUsd)}</b>
+          {team.budgetUsdMonthly != null
+            ? ` / ${formatUsd(team.budgetUsdMonthly)}`
+            : " (no budget)"}
         </span>
       </div>
-      {pct != null ? (
-        <Progress
-          value={pct}
-          className={cn(team.overBudget && "[&>div]:bg-destructive")}
+      <div className="bud-track">
+        <div
+          className="bud-fill"
+          style={{
+            width: `${pct}%`,
+            ...(team.overBudget
+              ? { background: "var(--red)" }
+              : {}),
+          }}
         />
-      ) : null}
+      </div>
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          marginTop: 7,
+        }}
+      >
+        <span
+          className="mono"
+          style={{
+            fontSize: 10.5,
+            color: team.overBudget ? "var(--red)" : "var(--green)",
+          }}
+        >
+          {team.budgetUsdMonthly != null
+            ? `${pct.toFixed(1)}% used · ${team.overBudget ? "over" : "healthy"}`
+            : "no budget set"}
+        </span>
+        {remaining != null ? (
+          <span
+            className="mono"
+            style={{ fontSize: 10.5, color: "var(--tx-faint)" }}
+          >
+            {formatUsd(remaining)} remaining
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
 
 /**
- * The Costs page: a usage + spend overview for the current month. Shows headline
- * KPIs (total spend, projects, teams over budget), a spend-over-time area chart,
- * a spend-by-project bar chart, per-team budget bars, and a per-project spend
- * table. All data is client-fetched via {@link useCostSummary}. Renders loading,
- * empty, and error states.
+ * The Costs page: a usage + spend overview for the current billing month in the
+ * "engineering terminal" design language. Headline stats (total spend, projects
+ * with spend, teams over budget), a hand-built SVG spend-over-time area chart, a
+ * spend-by-project bar list, per-team budget bars, and a per-project spend table
+ * — all from real {@link useCostSummary} data. Renders loading, empty, and error
+ * states.
  */
 export default function CostsPage(): React.JSX.Element {
   const costs = useCostSummary();
   const summary = costs.data;
 
-  const overBudgetCount = React.useMemo(
-    () => summary?.teams.filter((t) => t.overBudget).length ?? 0,
-    [summary],
-  );
-
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Costs"
-        description="Estimated compute spend for the current billing month."
-        actions={
-          summary ? (
-            <span className="text-xs text-muted-foreground">
-              {absoluteTime(summary.periodStart)} —{" "}
+    <div className="page fade-in">
+      <div className="phead">
+        <div className="phead-l">
+          <h1 className="ptitle">Costs</h1>
+          <p className="psub">
+            Estimated compute spend for the current billing month.
+          </p>
+        </div>
+        {summary ? (
+          <div className="phead-r">
+            <span className="daterange">
+              {absoluteTime(summary.periodStart)} →{" "}
               {absoluteTime(summary.periodEnd)}
             </span>
-          ) : undefined
-        }
-      />
+          </div>
+        ) : null}
+      </div>
 
       {costs.isLoading ? (
-        <LoadingSkeleton rows={3} variant="cards" />
+        <div className="empty">Loading cost summary…</div>
       ) : costs.error ? (
-        <ErrorState
-          description={costs.error.message}
-          onRetry={() => void costs.mutate()}
-        />
+        <div className="empty">Failed to load costs — {costs.error.message}</div>
       ) : !summary ? (
-        <EmptyState
-          icon={CircleDollarSign}
-          title="No cost data yet"
-          description="Spend appears here once previews start consuming compute."
-        />
+        <div className="empty">No cost data yet.</div>
       ) : (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-            <StatCard
-              icon={CircleDollarSign}
-              label="Total spend"
-              value={formatUsd(summary.totalUsd)}
-              hint="Month to date"
-            />
-            <StatCard
-              icon={FolderGit2}
-              label="Projects with spend"
-              value={summary.byProject.length}
-            />
-            <StatCard
-              icon={overBudgetCount > 0 ? TriangleAlert : Users}
-              label="Teams over budget"
-              value={overBudgetCount}
-              tone={overBudgetCount > 0 ? "danger" : "default"}
-              hint={`${summary.teams.length} ${summary.teams.length === 1 ? "team" : "teams"} total`}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle>Spend over time</CardTitle>
-                <CardDescription>Estimated USD per day.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {summary.byDay.length === 0 ? (
-                  <p className="py-12 text-center text-sm text-muted-foreground">
-                    No daily spend recorded yet.
-                  </p>
-                ) : (
-                  <CostOverTimeChart data={summary.byDay} />
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle>Spend by project</CardTitle>
-                <CardDescription>Top projects this month.</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {summary.byProject.length === 0 ? (
-                  <p className="py-12 text-center text-sm text-muted-foreground">
-                    No project spend recorded yet.
-                  </p>
-                ) : (
-                  <CostByProjectChart data={summary.byProject} />
-                )}
-              </CardContent>
-            </Card>
-          </div>
-
-          {summary.teams.length > 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>Team budgets</CardTitle>
-                <CardDescription>
-                  Spend against each team&apos;s monthly budget.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="divide-y">
-                {summary.teams.map((team) => (
-                  <TeamBudgetRow key={team.teamId} team={team} />
-                ))}
-              </CardContent>
-            </Card>
-          ) : null}
-
-          {summary.byProject.length > 0 ? (
-            <Card>
-              <CardHeader>
-                <CardTitle>By project</CardTitle>
-              </CardHeader>
-              <CardContent className="p-0">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Project</TableHead>
-                      <TableHead className="text-right">Estimated</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {summary.byProject.map((p) => (
-                      <TableRow key={p.projectId}>
-                        <TableCell className="font-medium">
-                          {p.projectName}
-                        </TableCell>
-                        <TableCell className="text-right font-mono text-sm">
-                          {formatUsd(p.estimatedUsd)}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </CardContent>
-            </Card>
-          ) : null}
-        </div>
+        <CostsBody summary={summary} />
       )}
     </div>
+  );
+}
+
+/** The populated Costs view, given a resolved {@link CostSummary}. */
+function CostsBody({ summary }: { summary: CostSummary }): React.JSX.Element {
+  const spendSeries = summary.byDay.map((d) => ({
+    d: dayLabel(d.date),
+    v: d.estimatedUsd,
+  }));
+  const projectsWithSpend = summary.byProject.filter(
+    (p) => p.estimatedUsd > 0,
+  ).length;
+  const overBudget = summary.teams.filter((t) => t.overBudget).length;
+  const spendByProject = summary.byProject.map((p, i) => ({
+    name: p.projectName,
+    v: p.estimatedUsd,
+    color: i === 0 ? "var(--acc)" : "var(--teal)",
+  }));
+
+  return (
+    <>
+      <div className="grid cols-3" style={{ marginBottom: 18 }}>
+        <StatCard
+          label="Total spend"
+          value={formatUsd(summary.totalUsd)}
+          icon={CircleDollarSign}
+          iconTone="acc"
+          sub="month to date"
+          spark={summary.byDay.map((d) => d.estimatedUsd)}
+          sparkColor="var(--acc)"
+        />
+        <StatCard
+          label="Projects with spend"
+          value={projectsWithSpend}
+          icon={Folder}
+          sub={`of ${summary.byProject.length} active`}
+        />
+        <StatCard
+          label="Teams over budget"
+          value={overBudget}
+          icon={Users}
+          iconTone={overBudget === 0 ? "green" : undefined}
+          sub={
+            overBudget === 0
+              ? "ok"
+              : `${summary.teams.length} ${summary.teams.length === 1 ? "team" : "teams"} total`
+          }
+        />
+      </div>
+
+      <div
+        className="two-col"
+        style={{ gridTemplateColumns: "1.25fr 1fr", marginBottom: 18 }}
+      >
+        <div className="panel">
+          <div className="panel-head">
+            <span className="panel-title">
+              <TrendingUp size={16} />
+              Spend over time
+            </span>
+            <span
+              className="panel-act mono"
+              style={{ fontSize: 11, color: "var(--tx-dim)" }}
+            >
+              USD / day
+            </span>
+          </div>
+          <div style={{ padding: "18px 18px 12px" }}>
+            {spendSeries.length === 0 ? (
+              <div className="empty">No daily spend recorded yet.</div>
+            ) : (
+              <AreaChart series={spendSeries} color="var(--acc)" height={230} />
+            )}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="panel-head">
+            <span className="panel-title">
+              <Activity size={16} />
+              Spend by project
+            </span>
+            <span
+              className="panel-act mono"
+              style={{ fontSize: 11, color: "var(--tx-dim)" }}
+            >
+              top this month
+            </span>
+          </div>
+          <div style={{ padding: "26px 20px" }}>
+            {spendByProject.length === 0 ? (
+              <div className="empty">No project spend recorded yet.</div>
+            ) : (
+              <>
+                <HBars data={spendByProject} />
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    marginTop: 14,
+                    paddingTop: 14,
+                    borderTop: "1px solid var(--line-soft)",
+                  }}
+                >
+                  <span style={{ color: "var(--tx-dim)", fontSize: 12 }}>
+                    Total across projects
+                  </span>
+                  <span
+                    className="mono"
+                    style={{ fontSize: 13, fontWeight: 600 }}
+                  >
+                    {formatUsd(summary.totalUsd)}
+                  </span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <div className="panel" style={{ marginBottom: 18 }}>
+        <div className="panel-head">
+          <span className="panel-title">
+            <Users size={16} />
+            Team budgets
+          </span>
+          <span
+            className="panel-act mono"
+            style={{ fontSize: 11, color: "var(--tx-dim)" }}
+          >
+            monthly
+          </span>
+        </div>
+        <div style={{ padding: "18px 20px" }}>
+          {summary.teams.length === 0 ? (
+            <div className="empty">No teams to show.</div>
+          ) : (
+            summary.teams.map((team) => (
+              <TeamBudget key={team.teamId} team={team} />
+            ))
+          )}
+        </div>
+      </div>
+
+      <div className="panel">
+        <div className="panel-head">
+          <span className="panel-title">
+            <Folder size={16} />
+            By project
+          </span>
+        </div>
+        {summary.byProject.length === 0 ? (
+          <div className="empty">No project spend recorded yet.</div>
+        ) : (
+          <table className="dtable">
+            <thead>
+              <tr>
+                <th>Project</th>
+                <th style={{ textAlign: "right" }}>Estimated</th>
+              </tr>
+            </thead>
+            <tbody>
+              {summary.byProject.map((p) => (
+                <tr key={p.projectId} style={{ cursor: "default" }}>
+                  <td>
+                    <span style={{ fontWeight: 600 }}>{p.projectName}</span>
+                  </td>
+                  <td style={{ textAlign: "right" }}>
+                    <span className="mono" style={{ fontWeight: 600 }}>
+                      {formatUsd(p.estimatedUsd)}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
   );
 }

@@ -55,6 +55,7 @@ import {
   usePreviewReviews,
   usePreviewServices,
 } from "@/lib/hooks";
+import { previewOpenTarget } from "@/lib/preview-link";
 import { usePreviewStatus } from "@/lib/sse";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import {
@@ -203,7 +204,11 @@ function PreviewHeader({
         <div className="flex flex-wrap items-center gap-2">
           {url ? (
             <Button asChild variant="outline">
-              <a href={url} target="_blank" rel="noopener noreferrer">
+              <a
+                href={previewOpenTarget({ id: preview.id, url }).href ?? url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
                 Open
                 <ExternalLink className="size-4" />
               </a>

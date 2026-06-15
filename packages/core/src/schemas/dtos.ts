@@ -13,6 +13,8 @@
  */
 
 import { z } from "zod";
+
+import { CuidSchema, EnvKeySchema, SlugSchema } from "./common.js";
 import {
   DeploymentTriggerSchema,
   EnvScopeSchema,
@@ -21,7 +23,6 @@ import {
   RepoProviderSchema,
   SeedKindSchema,
 } from "./enums.js";
-import { CuidSchema, EnvKeySchema, SlugSchema } from "./common.js";
 
 /**
  * Require that an "update" object has at least one defined key, so a PATCH with

@@ -11,7 +11,7 @@
  */
 
 import { DockerDriver, type BuildLogEvent } from "./docker.js";
-import { ContainerStartError, DaemonUnavailableError, DeployEngineError } from "./errors.js";
+import { ContainerStartError, DaemonUnavailableError } from "./errors.js";
 import { topologicalOrder } from "./graph.js";
 import { emitLog, emitProgress, emitServiceStatus } from "./hooks.js";
 import {
@@ -27,6 +27,8 @@ import {
   type ServiceState,
   type ServiceStatsSample,
 } from "./types.js";
+
+import type { DeployEngineError } from "./errors.js";
 
 /** Construct-time options for {@link DockerOrchestrator}. */
 export interface DockerOrchestratorOptions {

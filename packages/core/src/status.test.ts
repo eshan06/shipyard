@@ -1,4 +1,11 @@
 import { describe, expect, it } from "vitest";
+
+import {
+  DeploymentStatusSchema,
+  PreviewStatusSchema,
+  type DeploymentStatus,
+  type PreviewStatus,
+} from "./schemas/enums.js";
 import {
   DEPLOYMENT_STATUS_DISPLAY,
   DEPLOYMENT_TRANSITIONS,
@@ -11,12 +18,6 @@ import {
   isPreviewTerminal,
   previewStatusDisplay,
 } from "./status.js";
-import {
-  DeploymentStatusSchema,
-  PreviewStatusSchema,
-  type DeploymentStatus,
-  type PreviewStatus,
-} from "./schemas/enums.js";
 
 const PREVIEW_STATUSES = PreviewStatusSchema.options as readonly PreviewStatus[];
 const DEPLOYMENT_STATUSES =

@@ -16,6 +16,13 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:4000";
 const nextConfig = {
   reactStrictMode: true,
   transpilePackages: ["@shipyard/core"],
+  experimental: {
+    // Rewrite `lucide-react` barrel imports (used across ~27 files) into
+    // per-icon imports so the dev compiler and prod bundler only process the
+    // handful of icons each route actually uses — meaningfully faster cold dev
+    // compiles with no behavioural change.
+    optimizePackageImports: ["lucide-react"],
+  },
   // Lint runs as its own gate (`pnpm --filter @shipyard/web lint` / CI), not as
   // part of `next build`, so a stylistic lint nit never blocks a deploy build.
   // Type errors still fail the build (typescript.ignoreBuildErrors stays false).

@@ -1,271 +1,275 @@
 "use client";
 
-import { ShieldCheck, Users } from "lucide-react";
+import { KeyRound, Plus, Shield, Trash2, Users } from "lucide-react";
 import * as React from "react";
 
-import { PageHeader } from "@/components/page-header";
-import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/states";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { absoluteTime } from "@/lib/time";
+import { CopyBtn } from "@/components/sy";
+import { useMe, useTeamTokens } from "@/lib/hooks";
+import { absoluteTime, relativeTime } from "@/lib/time";
 import { formatUsd, initials } from "@/lib/utils";
 
-import { CopyButton } from "./_components/copy-button";
-import { TokenManager } from "./_components/token-manager";
 import { canManage, useActiveTeam } from "./_components/use-active-team";
 
-import type { Membership } from "@/lib/api-types";
+import type { ApiToken } from "@/lib/api-types";
 import type { MembershipRole } from "@shipyard/core";
 
-/** Badge variant per role. */
-const ROLE_VARIANT: Record<
-  MembershipRole,
-  React.ComponentProps<typeof Badge>["variant"]
-> = {
-  OWNER: "info",
-  ADMIN: "success",
-  MEMBER: "muted",
-  VIEWER: "muted",
-};
-
-/** A labelled key/value row in the team overview card. */
-function InfoRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}): React.JSX.Element {
-  return (
-    <div className="flex items-center justify-between gap-4 py-2.5">
-      <span className="text-sm text-muted-foreground">{label}</span>
-      <span className="min-w-0 truncate text-right text-sm font-medium">
-        {children}
-      </span>
-    </div>
-  );
-}
-
-/** Overview of the active team: name, slug, budget, identifier. */
-function TeamOverviewCard({
-  membership,
-}: {
-  membership: Membership;
-}): React.JSX.Element {
-  const team = membership.team;
-  if (!team) {
-    return (
-      <Card>
-        <CardContent className="p-6 text-sm text-muted-foreground">
-          Team details are unavailable.
-        </CardContent>
-      </Card>
-    );
+/** Deterministic magenta→blue gradient for a member avatar tile. */
+function avatarGradient(seed: string): string {
+  let h = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    h = (h * 31 + seed.charCodeAt(i)) % 360;
   }
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Users className="size-4 text-muted-foreground" />
-          {team.name}
-        </CardTitle>
-        <CardDescription>Workspace settings and billing.</CardDescription>
-      </CardHeader>
-      <CardContent className="divide-y">
-        <InfoRow label="Slug">
-          <span className="font-mono text-xs">{team.slug}</span>
-        </InfoRow>
-        <InfoRow label="Monthly budget">
-          {team.budgetUsdMonthly != null ? (
-            formatUsd(team.budgetUsdMonthly)
-          ) : (
-            <span className="text-muted-foreground">No budget set</span>
-          )}
-        </InfoRow>
-        <InfoRow label="Your role">
-          <Badge variant={ROLE_VARIANT[membership.role]}>
-            {membership.role}
-          </Badge>
-        </InfoRow>
-        <InfoRow label="Created">
-          <span className="text-muted-foreground">
-            {absoluteTime(team.createdAt)}
-          </span>
-        </InfoRow>
-        <div className="flex items-center justify-between gap-4 py-2.5">
-          <span className="text-sm text-muted-foreground">Team ID</span>
-          <span className="inline-flex items-center gap-1">
-            <span className="font-mono text-xs">{team.id}</span>
-            <CopyButton value={team.id} label="Copy team ID" size="icon" />
-          </span>
-        </div>
-      </CardContent>
-    </Card>
-  );
+  return `linear-gradient(135deg, hsl(${h} 70% 62%), hsl(${(h + 48) % 360} 72% 56%))`;
 }
 
-/** Lists the current user's memberships (the teams they belong to). */
-function MembershipsCard({
-  memberships,
-  activeTeamId,
-}: {
-  memberships: Membership[];
-  activeTeamId: string | null;
-}): React.JSX.Element {
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <ShieldCheck className="size-4 text-muted-foreground" />
-          Your teams
-        </CardTitle>
-        <CardDescription>
-          Teams you belong to and your role on each.
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="p-0">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Team</TableHead>
-              <TableHead className="text-right">Role</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {memberships.map((m) => (
-              <TableRow key={m.id}>
-                <TableCell>
-                  <div className="flex items-center gap-3">
-                    <Avatar className="size-7">
-                      <AvatarFallback className="text-[10px]">
-                        {initials(m.team?.name ?? m.teamId)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <div className="min-w-0">
-                      <p className="truncate font-medium">
-                        {m.team?.name ?? m.teamId}
-                        {m.teamId === activeTeamId ? (
-                          <span className="ml-2 text-xs text-muted-foreground">
-                            (current)
-                          </span>
-                        ) : null}
-                      </p>
-                      {m.team?.slug ? (
-                        <p className="truncate font-mono text-xs text-muted-foreground">
-                          {m.team.slug}
-                        </p>
-                      ) : null}
-                    </div>
-                  </div>
-                </TableCell>
-                <TableCell className="text-right">
-                  <Badge variant={ROLE_VARIANT[m.role]}>{m.role}</Badge>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
-  );
+/** The `.role` chip class for a membership role (owner-tinted vs member-tinted). */
+function roleClass(role: MembershipRole): string {
+  return `role ${role === "OWNER" ? "owner" : "member"}`;
 }
 
 /**
- * The Team settings page: a team selector (when the user belongs to several),
- * an overview of the active team (slug, budget, your role, identifier), the list
- * of teams you belong to with your role on each, and the active team's API
- * tokens. All data is client-fetched. Renders loading, empty, and error states.
+ * Team settings — "engineering terminal" redesign. Shows the active team's
+ * overview (slug, budget, member count, created, id), its members, and its API
+ * tokens, all wired to the real `/me` and team-token hooks. The active team and
+ * the caller's role come from {@link useActiveTeam}. The create/revoke controls
+ * render for ADMIN/OWNER roles but are presentational here. Renders
+ * loading/empty/error states.
  */
 export default function TeamSettingsPage(): React.JSX.Element {
-  const {
-    memberships,
-    teamId,
-    active,
-    role,
-    setTeamId,
-    isLoading,
-    error,
-    refresh,
-  } = useActiveTeam();
+  const me = useMe();
+  const { memberships, teamId, active, role, isLoading, error, refresh } =
+    useActiveTeam();
+  const tokens = useTeamTokens(teamId);
+  const tokenItems: ApiToken[] = tokens.data?.data ?? [];
+
+  const user = me.data?.user;
+  const team = active?.team;
 
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Team settings"
-        description="Manage your team, members, and API access."
-        actions={
-          memberships.length > 1 && teamId ? (
-            <Select value={teamId} onValueChange={setTeamId}>
-              <SelectTrigger className="w-[14rem]">
-                <SelectValue placeholder="Select team" />
-              </SelectTrigger>
-              <SelectContent>
-                {memberships.map((m) => (
-                  <SelectItem key={m.teamId} value={m.teamId}>
-                    {m.team?.name ?? m.teamId}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : undefined
-        }
-      />
+    <div className="page fade-in">
+      <div className="phead">
+        <div className="phead-l">
+          <h1 className="ptitle">Team settings</h1>
+          <p className="psub">Manage your team, members, and API access.</p>
+        </div>
+      </div>
 
       {isLoading ? (
-        <LoadingSkeleton rows={3} variant="cards" />
+        <div className="empty">Loading team…</div>
       ) : error ? (
-        <ErrorState
-          title="Couldn't load your teams"
-          description={error.message}
-          onRetry={refresh}
-        />
-      ) : memberships.length === 0 || !active || !teamId ? (
-        <EmptyState
-          icon={Users}
-          title="No teams"
-          description="You don't belong to any teams yet."
-        />
-      ) : (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-            <TeamOverviewCard membership={active} />
-            <MembershipsCard
-              memberships={memberships}
-              activeTeamId={teamId}
-            />
+        <div className="empty">
+          <div style={{ marginBottom: 10 }}>
+            Couldn&apos;t load your teams — {error.message}
           </div>
-          <Card>
-            <CardContent className="p-6">
-              <TokenManager
-                teamId={teamId}
-                canManageTokens={canManage(role)}
-              />
-            </CardContent>
-          </Card>
+          <button className="btn btn-outline btn-sm" onClick={refresh}>
+            Retry
+          </button>
         </div>
+      ) : memberships.length === 0 || !active || !team || !teamId ? (
+        <div className="empty">You don&apos;t belong to any teams yet.</div>
+      ) : (
+        <>
+          <div
+            className="two-col"
+            style={{ marginBottom: 18, alignItems: "start" }}
+          >
+            <div className="panel">
+              <div className="panel-head">
+                <span className="panel-title">
+                  <Users size={16} />
+                  {team.name}
+                </span>
+                <span className="panel-act">
+                  {role ? (
+                    <span className={roleClass(role)}>{role}</span>
+                  ) : null}
+                </span>
+              </div>
+              <div style={{ padding: "6px 18px 16px" }}>
+                <div className="kv">
+                  <span className="kv-k">Slug</span>
+                  <span className="kv-v mono">{team.slug}</span>
+                </div>
+                <div className="kv">
+                  <span className="kv-k">Monthly budget</span>
+                  <span className="kv-v mono">
+                    {team.budgetUsdMonthly != null
+                      ? formatUsd(team.budgetUsdMonthly)
+                      : "—"}
+                  </span>
+                </div>
+                <div className="kv">
+                  <span className="kv-k">Members</span>
+                  <span className="kv-v mono">{memberships.length}</span>
+                </div>
+                <div className="kv">
+                  <span className="kv-k">Created</span>
+                  <span className="kv-v mono">{absoluteTime(team.createdAt)}</span>
+                </div>
+                <div className="kv">
+                  <span className="kv-k">Team ID</span>
+                  <span className="kv-v">
+                    <span className="mono">{team.id}</span>
+                    <CopyBtn text={team.id} />
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="panel-head">
+                <span className="panel-title">
+                  <Users size={16} />
+                  Members
+                </span>
+                <span className="panel-act">
+                  <button className="btn btn-ghost btn-sm">
+                    <Plus size={13} />
+                    Invite
+                  </button>
+                </span>
+              </div>
+              <div style={{ padding: "8px 14px 12px" }}>
+                {user ? (
+                  (() => {
+                    const name = user.name ?? user.email;
+                    const handle = user.githubLogin ?? user.email;
+                    return (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 11,
+                          padding: "9px 4px",
+                          borderBottom: "1px solid var(--line-soft)",
+                        }}
+                      >
+                        <span
+                          className="avatar-sm"
+                          style={{ background: avatarGradient(handle) }}
+                        >
+                          {initials(name)}
+                        </span>
+                        <div style={{ minWidth: 0, flex: 1 }}>
+                          <div style={{ fontSize: 13, fontWeight: 600 }}>
+                            {name}
+                          </div>
+                          <div
+                            className="mono"
+                            style={{ fontSize: 11, color: "var(--tx-dim)" }}
+                          >
+                            @{handle}
+                          </div>
+                        </div>
+                        {role ? (
+                          <span className={roleClass(role)}>{role}</span>
+                        ) : null}
+                      </div>
+                    );
+                  })()
+                ) : (
+                  <div className="empty">No members to show.</div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          <div className="panel">
+            <div className="panel-head">
+              <span className="panel-title">
+                <KeyRound size={16} />
+                API tokens
+              </span>
+              <span className="panel-act">
+                {canManage(role) ? (
+                  <button className="btn btn-primary btn-sm" type="button">
+                    <Plus size={13} />
+                    Create token
+                  </button>
+                ) : null}
+              </span>
+            </div>
+
+            {tokens.isLoading ? (
+              <div className="empty">Loading tokens…</div>
+            ) : tokens.error ? (
+              <div className="empty">Couldn&apos;t load tokens.</div>
+            ) : tokenItems.length === 0 ? (
+              <div className="empty">No API tokens yet.</div>
+            ) : (
+              <table className="dtable">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Prefix</th>
+                    <th>Last used</th>
+                    <th>Expires</th>
+                    <th style={{ textAlign: "right" }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tokenItems.map((tk) => (
+                    <tr key={tk.id} style={{ cursor: "default" }}>
+                      <td>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 9,
+                          }}
+                        >
+                          <KeyRound size={14} style={{ color: "var(--tx-dim)" }} />
+                          <span style={{ fontWeight: 600 }}>{tk.name}</span>
+                        </div>
+                      </td>
+                      <td>
+                        <span className="c-mono">{tk.prefix}…</span>
+                      </td>
+                      <td>
+                        <span className="c-mono" style={{ color: "var(--tx-dim)" }}>
+                          {tk.lastUsedAt ? relativeTime(tk.lastUsedAt) : "never"}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="c-mono" style={{ color: "var(--tx-dim)" }}>
+                          {tk.expiresAt ? absoluteTime(tk.expiresAt) : "never"}
+                        </span>
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        {canManage(role) ? (
+                          <button
+                            className="copybtn"
+                            type="button"
+                            style={{ marginLeft: "auto" }}
+                            aria-label={`Revoke ${tk.name}`}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        ) : null}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+
+            <div
+              style={{
+                padding: "13px 16px",
+                borderTop: "1px solid var(--line-soft)",
+                display: "flex",
+                alignItems: "center",
+                gap: 9,
+                color: "var(--tx-dim)",
+              }}
+            >
+              <Shield size={14} />
+              <span style={{ fontSize: 12 }} className="mono">
+                Tokens are shown once at creation. Store them securely.
+              </span>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

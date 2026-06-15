@@ -12,15 +12,16 @@
 import { topologicalOrder } from "./graph.js";
 import { emitLog, emitProgress, emitServiceStatus } from "./hooks.js";
 import { aggregatePreviewState } from "./orchestrator.js";
-import {
-  type DeployResult,
-  type OrchestratorHooks,
-  type PreviewOrchestrator,
-  type PreviewPlan,
-  type PreviewStatusSnapshot,
-  type ServicePlan,
-  type ServiceRuntime,
-  type ServiceStatsSample,
+
+import type {
+  DeployResult,
+  OrchestratorHooks,
+  PreviewOrchestrator,
+  PreviewPlan,
+  PreviewStatusSnapshot,
+  ServicePlan,
+  ServiceRuntime,
+  ServiceStatsSample,
 } from "./types.js";
 
 /** Construct-time options for {@link MockOrchestrator}. */

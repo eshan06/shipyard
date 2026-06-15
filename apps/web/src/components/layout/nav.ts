@@ -1,11 +1,11 @@
 import {
-  Boxes,
-  DollarSign,
+  CircleDollarSign,
   FolderGit2,
-  Hammer,
-  LayoutDashboard,
+  Layers,
+  LayoutGrid,
   Rocket,
-  Settings,
+  SlidersHorizontal,
+  SquareTerminal,
   type LucideIcon,
 } from "lucide-react";
 
@@ -26,13 +26,13 @@ export interface NavItem {
 
 /** The dashboard's primary navigation, in display order. */
 export const NAV_ITEMS: readonly NavItem[] = [
-  { label: "Overview", href: "/", icon: LayoutDashboard, exact: true },
-  { label: "Previews", href: "/previews", icon: Boxes },
+  { label: "Overview", href: "/", icon: LayoutGrid, exact: true },
+  { label: "Previews", href: "/previews", icon: Layers },
   { label: "Deployments", href: "/deployments", icon: Rocket },
-  { label: "Builds", href: "/builds", icon: Hammer },
-  { label: "Costs", href: "/costs", icon: DollarSign },
+  { label: "Builds", href: "/builds", icon: SquareTerminal },
+  { label: "Costs", href: "/costs", icon: CircleDollarSign },
   { label: "Projects", href: "/projects", icon: FolderGit2 },
-  { label: "Settings", href: "/settings/team", icon: Settings },
+  { label: "Settings", href: "/settings/team", icon: SlidersHorizontal },
 ];
 
 /**

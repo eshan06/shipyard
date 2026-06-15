@@ -3,280 +3,349 @@
 import {
   Activity,
   ArrowUpRight,
-  Boxes,
+  Box,
+  CircleCheck,
   CircleDollarSign,
+  GitCommit,
+  Globe,
+  Layers,
+  Plus,
   Rocket,
-  TriangleAlert,
 } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 
-
-import { OnboardingChecklist } from "@/components/onboarding-checklist";
-import { PageHeader } from "@/components/page-header";
-import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/states";
-import { StatusBadge } from "@/components/status-badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { StatusBadge, statusColorVar } from "@/components/status-badge";
+import { StatCard } from "@/components/sy";
 import {
   useCostSummary,
   useDeployments,
   usePreviews,
 } from "@/lib/hooks";
 import { relativeTime } from "@/lib/time";
-import { cn, formatUsd, shortSha } from "@/lib/utils";
+import { formatDuration, formatUsd, shortSha } from "@/lib/utils";
 
+import type { DeltaDir } from "@/components/sy";
 import type { Deployment, Preview } from "@/lib/api-types";
-import type { LucideIcon } from "lucide-react";
 
-/** A single KPI stat card with an icon, value, and label. */
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-  hint,
-  tone = "default",
-  loading,
+/** Status values whose dot should pulse in the timeline (live deployments). */
+const LIVE_DEPLOYMENT = new Set(["QUEUED", "BUILDING", "DEPLOYING"]);
+
+/** A single deployment row in the "Recent deployments" timeline. */
+function DeploymentRow({
+  d,
+  last,
 }: {
-  icon: LucideIcon;
-  label: string;
-  value: React.ReactNode;
-  hint?: string;
-  tone?: "default" | "success" | "warning" | "danger" | "info";
-  loading?: boolean;
+  d: Deployment;
+  last: boolean;
 }): React.JSX.Element {
-  const toneClass = {
-    default: "text-muted-foreground",
-    success: "text-success",
-    warning: "text-warning",
-    danger: "text-destructive",
-    info: "text-info",
-  }[tone];
-
-  return (
-    <Card>
-      <CardContent className="flex items-start justify-between p-5">
-        <div className="space-y-1">
-          <p className="text-sm font-medium text-muted-foreground">{label}</p>
-          {loading ? (
-            <div className="h-8 w-16 animate-pulse rounded bg-muted" />
-          ) : (
-            <p className="text-2xl font-semibold tracking-tight">{value}</p>
-          )}
-          {hint ? (
-            <p className="text-xs text-muted-foreground">{hint}</p>
-          ) : null}
-        </div>
-        <div
-          className={cn(
-            "flex size-9 items-center justify-center rounded-lg bg-muted",
-            toneClass,
-          )}
-        >
-          <Icon className="size-5" />
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-/** A compact recent-deployment row. */
-function DeploymentRow({ d }: { d: Deployment }): React.JSX.Element {
+  const live = LIVE_DEPLOYMENT.has(d.status);
+  const dotColor = statusColorVar(d.status, "deployment");
   return (
     <Link
       href={`/deployments/${d.id}`}
-      className="flex items-center justify-between gap-3 rounded-md px-3 py-2.5 transition-colors hover:bg-accent"
+      className="tl-row"
+      style={{
+        display: "flex",
+        gap: 14,
+        padding: "11px 0",
+        borderBottom: last ? "none" : "1px solid var(--line-soft)",
+        alignItems: "center",
+        cursor: "pointer",
+      }}
     >
-      <div className="flex min-w-0 items-center gap-3">
-        <StatusBadge status={d.status} kind="deployment" />
-        <div className="min-w-0">
-          <p className="truncate text-sm font-medium">
-            {d.preview?.name ?? d.preview?.slug ?? "Deployment"}
-          </p>
-          <p className="truncate text-xs text-muted-foreground">
-            <span className="font-mono">{shortSha(d.commitSha)}</span> ·{" "}
+      <div
+        style={{
+          position: "relative",
+          width: 10,
+          flex: "none",
+          alignSelf: "stretch",
+          display: "flex",
+          justifyContent: "center",
+        }}
+      >
+        <span
+          className={live ? "pulse-dot" : ""}
+          style={{
+            width: 9,
+            height: 9,
+            borderRadius: "50%",
+            marginTop: 4,
+            background: dotColor,
+            boxShadow: `0 0 0 3px color-mix(in srgb, ${dotColor} 22%, transparent)`,
+          }}
+        />
+      </div>
+      <div style={{ minWidth: 0, flex: 1 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <StatusBadge status={d.status} kind="deployment" />
+          <span style={{ fontWeight: 600, fontSize: 13 }}>
+            {d.preview ? `PR #${d.preview.slug}` : "Deployment"}
+          </span>
+          <span
+            className="mono"
+            style={{ color: "var(--tx-dim)", fontSize: 12 }}
+          >
+            {d.preview?.name ?? ""}
+          </span>
+        </div>
+        <div className="meta" style={{ marginTop: 5 }}>
+          <GitCommit />
+          <span>{shortSha(d.commitSha)}</span>
+          <span className="dot-sep" />
+          <span className="trigpill">{d.trigger}</span>
+          <span className="dot-sep" />
+          <span style={{ color: "var(--tx-faint)" }}>
             {relativeTime(d.queuedAt)}
-          </p>
+          </span>
         </div>
       </div>
-      <ArrowUpRight className="size-4 shrink-0 text-muted-foreground" />
+      <span
+        className="mono"
+        style={{ color: "var(--tx-dim)", fontSize: 11.5 }}
+      >
+        {formatDuration(d.durationMs)}
+      </span>
+      <ArrowUpRight size={15} style={{ color: "var(--tx-faint)" }} />
     </Link>
   );
 }
 
-/** A compact active-preview card. */
-function PreviewCard({ p }: { p: Preview }): React.JSX.Element {
+/** A single active-preview card in the right-hand panel. */
+function ActivePreviewCard({ p }: { p: Preview }): React.JSX.Element {
+  const building = p.status === "BUILDING" || p.status === "DEPLOYING";
+  const running = p.status === "RUNNING";
   return (
     <Link
       href={`/previews/${p.id}`}
-      className="flex flex-col gap-2 rounded-lg border p-4 transition-colors hover:border-primary/40 hover:bg-accent/40"
+      className="card"
+      style={{ padding: 14, cursor: "pointer", display: "block" }}
     >
-      <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-medium">{p.name}</span>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <div className="pv-id">
+            {p.pullRequest ? (
+              <span className="pr">PR #{p.pullRequest.number}</span>
+            ) : null}
+            <span className="nm">{p.slug}</span>
+          </div>
+          <div className="pv-proj">
+            {p.project.name}
+            {p.branch ? ` · ${p.branch}` : ""}
+          </div>
+        </div>
         <StatusBadge status={p.status} kind="preview" />
       </div>
-      <p className="truncate text-xs text-muted-foreground">
-        {p.project.name}
-        {p.branch ? ` · ${p.branch}` : ""}
-      </p>
+      {building ? (
+        <div className="bprog indet" style={{ marginTop: 12 }}>
+          <i />
+        </div>
+      ) : null}
+      {running && p.url ? (
+        <div className="pv-url" style={{ marginTop: 12 }}>
+          <Globe />
+          <span className="u">{p.url}</span>
+        </div>
+      ) : null}
     </Link>
   );
 }
 
 /**
- * The Overview page: top-line KPI stat cards (active previews, running /
- * building / failed counts, deployments today, estimated monthly cost) plus a
- * recent-deployments list and an active-previews grid. Every section has its own
- * loading, empty, and error states.
+ * The Overview page: a page header, a four-up row of KPI stat cards (active
+ * previews, running, deploys today, est. monthly cost), and a two-column body
+ * with a recent-deployments timeline and an active-previews list. Every section
+ * renders its own loading / empty / error state from the real SWR hooks.
  */
 export default function OverviewPage(): React.JSX.Element {
   const previews = usePreviews({ limit: 100 });
-  const deployments = useDeployments({ limit: 8 });
+  const deployments = useDeployments({ limit: 50 });
   const costs = useCostSummary();
 
-  const all = previews.data?.data ?? [];
-  const active = all.filter((p) => p.statusDisplay.isActive);
-  const running = all.filter((p) => p.status === "RUNNING").length;
-  const building = all.filter(
+  const allPreviews = previews.data?.data ?? [];
+  const liveOnly = allPreviews.filter((p) => p.destroyedAt == null);
+  const running = liveOnly.filter((p) => p.status === "RUNNING").length;
+  const building = liveOnly.filter(
     (p) => p.status === "BUILDING" || p.status === "DEPLOYING",
   ).length;
-  const failed = all.filter((p) => p.status === "FAILED").length;
 
+  const allDeployments = deployments.data?.data ?? [];
   const startOfToday = React.useMemo(() => {
     const d = new Date();
     d.setHours(0, 0, 0, 0);
     return d.getTime();
   }, []);
-  const deploysToday = (deployments.data?.data ?? []).filter(
+  const today = allDeployments.filter(
     (d) => new Date(d.queuedAt).getTime() >= startOfToday,
-  ).length;
+  );
+  const failedToday = today.filter((d) => d.status === "FAILED").length;
+
+  const recent = allDeployments.slice(0, 8);
+  const active = liveOnly.filter((p) =>
+    ["BUILDING", "DEPLOYING", "RUNNING"].includes(p.status),
+  );
+
+  // Cost spark + delta are derived from the real `byDay` series only.
+  const byDay = costs.data?.byDay ?? [];
+  const costSpark = byDay.map((d) => d.estimatedUsd);
+  const firstDay = byDay[0];
+  const lastDay = byDay[byDay.length - 1];
+  let costDelta: { dir: DeltaDir; text: string } | undefined;
+  if (firstDay && lastDay && firstDay.estimatedUsd > 0) {
+    const pct = Math.round(
+      ((lastDay.estimatedUsd - firstDay.estimatedUsd) / firstDay.estimatedUsd) *
+        100,
+    );
+    if (pct !== 0) {
+      costDelta = {
+        dir: pct > 0 ? "up" : "down",
+        text: `${pct > 0 ? "+" : ""}${pct}%`,
+      };
+    }
+  }
 
   return (
-    <div className="space-y-8">
-      <OnboardingChecklist />
+    <div className="page fade-in">
+      <div className="phead">
+        <div className="phead-l">
+          <h1 className="ptitle">Overview</h1>
+          <p className="psub">
+            A live snapshot of your preview environments and recent activity.
+          </p>
+        </div>
+        <div className="phead-r">
+          <Link className="btn btn-ghost" href="/previews">
+            <Layers size={15} />
+            View previews
+          </Link>
+          <Link className="btn btn-primary" href="/previews/new">
+            <Plus size={15} />
+            New preview
+          </Link>
+        </div>
+      </div>
 
-      <PageHeader
-        title="Overview"
-        description="A live snapshot of your preview environments and recent activity."
-        actions={
-          <Button asChild>
-            <Link href="/previews">
-              <Boxes className="size-4" />
-              View previews
-            </Link>
-          </Button>
-        }
-      />
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid cols-4">
         <StatCard
-          icon={Boxes}
           label="Active previews"
           value={active.length}
-          hint={`${all.length} total`}
-          tone="info"
-          loading={previews.isLoading}
+          sub={`${liveOnly.length} total`}
+          icon={Box}
+          iconTone="acc"
         />
         <StatCard
-          icon={Activity}
           label="Running"
           value={running}
-          hint={`${building} building`}
-          tone="success"
-          loading={previews.isLoading}
+          sub={`${building} building`}
+          icon={Activity}
+          iconTone="green"
+          delta={running > 0 ? { dir: "flat", text: "live" } : undefined}
         />
         <StatCard
-          icon={Rocket}
           label="Deploys today"
-          value={deploysToday}
-          hint={failed > 0 ? `${failed} failed previews` : "All healthy"}
-          tone={failed > 0 ? "warning" : "default"}
-          loading={deployments.isLoading}
+          value={today.length}
+          sub={`${failedToday} failed`}
+          icon={Rocket}
+          iconTone="blue"
         />
         <StatCard
-          icon={CircleDollarSign}
           label="Est. monthly cost"
           value={formatUsd(costs.data?.totalUsd ?? 0)}
-          hint="Current period"
-          tone="default"
-          loading={costs.isLoading}
+          sub="current period"
+          icon={CircleDollarSign}
+          spark={costSpark.length > 1 ? costSpark : undefined}
+          sparkColor="var(--teal)"
+          delta={costDelta}
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        {/* Recent deployments */}
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <CardTitle>Recent deployments</CardTitle>
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/deployments">View all</Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
+      <div className="two-col section-gap">
+        {/* Recent deployments timeline */}
+        <div className="panel">
+          <div className="panel-head">
+            <span className="panel-title">
+              <Rocket size={16} />
+              Recent deployments
+            </span>
+            <span className="panel-act">
+              <Link className="link" href="/deployments">
+                View all
+                <ArrowUpRight />
+              </Link>
+            </span>
+          </div>
+          <div style={{ padding: "8px 18px 14px" }}>
             {deployments.isLoading ? (
-              <LoadingSkeleton rows={4} />
+              <div className="empty">Loading deployments…</div>
             ) : deployments.error ? (
-              <ErrorState
-                description={deployments.error.message}
-                onRetry={() => void deployments.mutate()}
-              />
-            ) : (deployments.data?.data.length ?? 0) === 0 ? (
-              <EmptyState
-                icon={Rocket}
-                title="No deployments yet"
-                description="Deployments will appear here as previews are created."
-              />
+              <div className="empty">Failed to load deployments.</div>
+            ) : recent.length === 0 ? (
+              <div className="empty">No deployments yet.</div>
             ) : (
-              <div className="-mx-3 divide-y divide-border/60">
-                {deployments.data?.data.map((d) => (
-                  <DeploymentRow key={d.id} d={d} />
-                ))}
-              </div>
+              recent.map((d, i) => (
+                <DeploymentRow
+                  key={d.id}
+                  d={d}
+                  last={i === recent.length - 1}
+                />
+              ))
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
         {/* Active previews */}
-        <Card>
-          <CardHeader className="flex-row items-center justify-between">
-            <CardTitle>Active previews</CardTitle>
-            <Button asChild variant="ghost" size="sm">
-              <Link href="/previews">View all</Link>
-            </Button>
-          </CardHeader>
-          <CardContent>
+        <div className="panel" style={{ alignSelf: "start" }}>
+          <div className="panel-head">
+            <span className="panel-title">
+              <Box size={16} />
+              Active previews
+            </span>
+            <span className="panel-act">
+              <Link className="link" href="/previews">
+                View all
+                <ArrowUpRight />
+              </Link>
+            </span>
+          </div>
+          <div
+            style={{
+              padding: 14,
+              display: "flex",
+              flexDirection: "column",
+              gap: 11,
+            }}
+          >
             {previews.isLoading ? (
-              <LoadingSkeleton rows={4} />
+              <div className="empty">Loading previews…</div>
             ) : previews.error ? (
-              <ErrorState
-                description={previews.error.message}
-                onRetry={() => void previews.mutate()}
-              />
+              <div className="empty">Failed to load previews.</div>
             ) : active.length === 0 ? (
-              <EmptyState
-                icon={failed > 0 ? TriangleAlert : Boxes}
-                title="No active previews"
-                description="Open a pull request or create a preview to get started."
-                action={
-                  <Button asChild size="sm">
-                    <Link href="/previews">Go to previews</Link>
-                  </Button>
-                }
-              />
+              <div className="empty">No active previews.</div>
             ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                {active.slice(0, 6).map((p) => (
-                  <PreviewCard key={p.id} p={p} />
+              <>
+                {active.map((p) => (
+                  <ActivePreviewCard key={p.id} p={p} />
                 ))}
-              </div>
+                <div
+                  className="card"
+                  style={{
+                    padding: "13px 14px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 10,
+                    color: "var(--tx-dim)",
+                  }}
+                >
+                  <CircleCheck size={16} style={{ color: "var(--green)" }} />
+                  <span style={{ fontSize: 12.5 }}>
+                    {liveOnly.length - active.length} idle previews ·{" "}
+                    <span className="mono">$0.00/hr</span> while stopped
+                  </span>
+                </div>
+              </>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
   );

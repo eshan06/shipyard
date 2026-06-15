@@ -1,119 +1,118 @@
 "use client";
 
 import {
-  Boxes,
   ExternalLink,
+  Filter,
+  Folder,
   GitBranch,
   GitPullRequest,
-  Pin,
+  Globe,
+  Plus,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import * as React from "react";
 
-import {
-  PREVIEW_STATUS_DISPLAY,
-  type PreviewStatus,
-} from "@shipyard/core";
+import { PREVIEW_STATUS_DISPLAY } from "@shipyard/core/status";
 
-import { PageHeader } from "@/components/page-header";
-import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/states";
-import { StatusBadge } from "@/components/status-badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { StatusBadge, statusColorVar } from "@/components/status-badge";
+import { Select } from "@/components/sy";
 import { usePreviews, useProjects } from "@/lib/hooks";
+import { previewOpenTarget } from "@/lib/preview-link";
 import { relativeTime } from "@/lib/time";
 
 import type { Preview } from "@/lib/api-types";
+import type { PreviewStatus } from "@shipyard/core";
 
 /** Sentinel select value meaning "no filter". */
 const ALL = "__all__";
 
 /** A single preview card in the responsive grid. */
 function PreviewCard({ p }: { p: Preview }): React.JSX.Element {
+  const building = p.status === "BUILDING" || p.status === "DEPLOYING";
+  const live = p.status === "RUNNING";
+  const openHref = p.url ? (previewOpenTarget(p).href ?? p.url) : null;
+
   return (
-    <Card className="group transition-colors hover:border-primary/40">
-      <CardContent className="flex flex-col gap-4 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <Link
-              href={`/previews/${p.id}`}
-              className="flex items-center gap-1.5 truncate text-sm font-semibold hover:underline"
-            >
-              {p.isPinned ? (
-                <Pin className="size-3.5 shrink-0 text-primary" />
-              ) : null}
-              {p.name}
-            </Link>
-            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-              {p.project.name}
-            </p>
-          </div>
-          <StatusBadge status={p.status} kind="preview" />
-        </div>
-
-        <div className="space-y-1.5 text-xs text-muted-foreground">
-          {p.branch ? (
-            <div className="flex items-center gap-1.5">
-              <GitBranch className="size-3.5 shrink-0" />
-              <span className="truncate font-mono">{p.branch}</span>
-            </div>
-          ) : null}
-          {p.pullRequest ? (
-            <div className="flex items-center gap-1.5">
-              <GitPullRequest className="size-3.5 shrink-0" />
-              <a
-                href={p.pullRequest.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="truncate hover:text-foreground hover:underline"
-              >
-                #{p.pullRequest.number} {p.pullRequest.title}
-              </a>
-            </div>
-          ) : null}
-        </div>
-
-        <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted-foreground">
-            {relativeTime(p.lastActivityAt)}
-          </span>
-          <div className="flex items-center gap-1.5">
-            {p.url ? (
-              <Button asChild variant="outline" size="sm">
-                <a
-                  href={p.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  aria-label="Open preview"
-                >
-                  Open
-                  <ExternalLink className="size-3.5" />
-                </a>
-              </Button>
+    <div
+      className="pvcard"
+      style={{ ["--statc" as string]: statusColorVar(p.status, "preview") }}
+    >
+      <div className="pv-top">
+        <div style={{ minWidth: 0 }}>
+          <div className="pv-id">
+            {p.isPinned ? <Zap size={13} className="pv-star" /> : null}
+            {p.pullRequest ? (
+              <span className="pr">PR #{p.pullRequest.number}</span>
             ) : null}
-            <Button asChild size="sm" variant="ghost">
-              <Link href={`/previews/${p.id}`}>Details</Link>
-            </Button>
+            <span className="nm">{p.slug}</span>
           </div>
+          <div className="pv-proj">{p.project.name}</div>
         </div>
-      </CardContent>
-    </Card>
+        <span className="pv-badge">
+          <StatusBadge status={p.status} kind="preview" />
+        </span>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+        {p.branch ? (
+          <div className="meta">
+            <GitBranch />
+            <span className="truncate">{p.branch}</span>
+          </div>
+        ) : null}
+        {p.pullRequest ? (
+          <div className="meta">
+            <GitPullRequest />
+            <span className="truncate" style={{ color: "var(--tx-mid)" }}>
+              #{p.pullRequest.number} {p.pullRequest.title}
+            </span>
+          </div>
+        ) : null}
+      </div>
+
+      {building ? (
+        <div className="bprog indet">
+          <i />
+        </div>
+      ) : null}
+      {live && p.url ? (
+        <div className="pv-url">
+          <Globe />
+          <span className="u">{p.url}</span>
+        </div>
+      ) : null}
+
+      <div className="pv-foot">
+        <span className="pv-time">{relativeTime(p.lastActivityAt)}</span>
+        <div className="pv-actions">
+          {openHref ? (
+            <a
+              className="btn btn-ghost btn-sm"
+              href={openHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Open preview"
+            >
+              Open
+              <ExternalLink size={13} />
+            </a>
+          ) : null}
+          <Link className="btn btn-outline btn-sm" href={`/previews/${p.id}`}>
+            Details
+          </Link>
+        </div>
+      </div>
+    </div>
   );
 }
 
 /**
- * The Previews list page: a responsive grid of preview cards with status +
- * project filters. Each card shows status, project, branch/PR, last activity,
- * and quick actions (open URL, details). Renders loading, empty, and error
- * states.
+ * The Previews list page: an "engineering terminal" grid of preview cards with
+ * status + project filters. Each card shows a status stripe, project, branch/PR,
+ * build progress / live URL, last activity, and quick actions (open URL,
+ * details). Renders loading, empty, and error states.
  */
 export default function PreviewsPage(): React.JSX.Element {
   // Seed the project filter from the `?projectId=` query param so deep links
@@ -133,78 +132,60 @@ export default function PreviewsPage(): React.JSX.Element {
 
   const items = previews.data?.data ?? [];
 
+  const projOpts = [
+    { value: ALL, label: "All projects" },
+    ...(projects.data?.data ?? []).map((proj) => ({
+      value: proj.id,
+      label: proj.name,
+    })),
+  ];
+  const statusOpts = [
+    { value: ALL, label: "All statuses" },
+    ...(Object.keys(PREVIEW_STATUS_DISPLAY) as PreviewStatus[]).map((s) => ({
+      value: s,
+      label: PREVIEW_STATUS_DISPLAY[s].label,
+    })),
+  ];
+
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Previews"
-        description="Every live preview environment across your projects."
-        actions={
-          <div className="flex flex-wrap items-center gap-2">
-            <Select value={projectId} onValueChange={setProjectId}>
-              <SelectTrigger className="w-[11rem]">
-                <SelectValue placeholder="Project" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All projects</SelectItem>
-                {projects.data?.data.map((proj) => (
-                  <SelectItem key={proj.id} value={proj.id}>
-                    {proj.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="w-[10rem]">
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={ALL}>All statuses</SelectItem>
-                {(
-                  Object.keys(PREVIEW_STATUS_DISPLAY) as PreviewStatus[]
-                ).map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {PREVIEW_STATUS_DISPLAY[s].label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        }
-      />
+    <div className="page fade-in">
+      <div className="phead">
+        <div className="phead-l">
+          <h1 className="ptitle">Previews</h1>
+          <p className="psub">
+            Every live preview environment across your projects.
+          </p>
+        </div>
+        <div className="phead-r">
+          <Select
+            value={projectId}
+            options={projOpts}
+            onChange={setProjectId}
+            icon={Folder}
+            width={180}
+          />
+          <Select
+            value={status}
+            options={statusOpts}
+            onChange={setStatus}
+            icon={Filter}
+            width={180}
+          />
+          <button className="btn btn-primary">
+            <Plus size={15} />
+            New preview
+          </button>
+        </div>
+      </div>
 
       {previews.isLoading ? (
-        <LoadingSkeleton variant="cards" rows={6} />
+        <div className="empty">Loading previews…</div>
       ) : previews.error ? (
-        <ErrorState
-          description={previews.error.message}
-          onRetry={() => void previews.mutate()}
-        />
+        <div className="empty">{previews.error.message}</div>
       ) : items.length === 0 ? (
-        <EmptyState
-          icon={Boxes}
-          title="No previews found"
-          description={
-            status !== ALL || projectId !== ALL
-              ? "No previews match the current filters. Try clearing them."
-              : "Previews appear automatically when pull requests are opened."
-          }
-          action={
-            status !== ALL || projectId !== ALL ? (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  setStatus(ALL);
-                  setProjectId(ALL);
-                }}
-              >
-                Clear filters
-              </Button>
-            ) : undefined
-          }
-        />
+        <div className="empty">No previews match these filters.</div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="pv-grid">
           {items.map((p) => (
             <PreviewCard key={p.id} p={p} />
           ))}

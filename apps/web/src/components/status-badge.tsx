@@ -3,15 +3,17 @@ import * as React from "react";
 import {
   DEPLOYMENT_STATUS_DISPLAY,
   PREVIEW_STATUS_DISPLAY,
-  type DeploymentStatus,
-  type PreviewStatus,
-  type ServiceStatus,
   type StatusColorToken,
   type StatusDisplay,
-} from "@shipyard/core";
+} from "@shipyard/core/status";
 
-import { Badge, type BadgeProps } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+
+import type {
+  DeploymentStatus,
+  PreviewStatus,
+  ServiceStatus,
+} from "@shipyard/core";
 
 /**
  * Service-status display metadata. `@shipyard/core` ships preview/deployment
@@ -27,22 +29,16 @@ const SERVICE_STATUS_DISPLAY: Readonly<Record<ServiceStatus, StatusDisplay>> = {
   CRASHED: { label: "Crashed", color: "danger", isActive: false },
 };
 
-/** Map a core {@link StatusColorToken} to a {@link Badge} variant. */
-const TOKEN_TO_VARIANT: Record<StatusColorToken, BadgeProps["variant"]> = {
-  neutral: "muted",
-  info: "info",
-  success: "success",
-  warning: "warning",
-  danger: "destructive",
-};
+/** Design-system status tone (drives the `badge b-*` classes + `--*` colors). */
+export type StatusTone = "green" | "blue" | "red" | "amber" | "gray";
 
-/** Map a token to the dot color used in the badge. */
-const TOKEN_TO_DOT: Record<StatusColorToken, string> = {
-  neutral: "bg-muted-foreground",
-  info: "bg-info",
-  success: "bg-success",
-  warning: "bg-warning",
-  danger: "bg-destructive",
+/** Map a core {@link StatusColorToken} to a design-system tone. */
+const TOKEN_TO_TONE: Record<StatusColorToken, StatusTone> = {
+  neutral: "gray",
+  info: "blue",
+  success: "green",
+  warning: "amber",
+  danger: "red",
 };
 
 /** What kind of status the {@link StatusBadge} should resolve. */
@@ -61,10 +57,7 @@ export interface StatusBadgeProps {
 }
 
 /** Resolve the display metadata for a status + kind. */
-function resolveDisplay(
-  status: string,
-  kind: StatusKind,
-): StatusDisplay {
+function resolveDisplay(status: string, kind: StatusKind): StatusDisplay {
   if (kind === "preview" && status in PREVIEW_STATUS_DISPLAY) {
     return PREVIEW_STATUS_DISPLAY[status as PreviewStatus];
   }
@@ -77,10 +70,27 @@ function resolveDisplay(
   return { label: status, color: "neutral", isActive: false };
 }
 
+/** The design tone (`green`/`blue`/…) for a status — e.g. for card stripes. */
+export function statusTone(
+  status: PreviewStatus | DeploymentStatus | ServiceStatus | string,
+  kind: StatusKind,
+): StatusTone {
+  return TOKEN_TO_TONE[resolveDisplay(String(status), kind).color];
+}
+
+/** The CSS color var (`var(--green)` …) for a status — e.g. a left stripe. */
+export function statusColorVar(
+  status: PreviewStatus | DeploymentStatus | ServiceStatus | string,
+  kind: StatusKind,
+): string {
+  return `var(--${statusTone(status, kind)})`;
+}
+
 /**
- * A status pill that renders the human label and themed color for a preview,
- * deployment, or service status — sourced from `@shipyard/core`'s display maps
- * mapped onto the dashboard color tokens. Active statuses pulse their dot.
+ * A status pill in the "engineering terminal" design language: a mono label +
+ * tinted soft background/border, with a colored dot that pulses for live states
+ * (building/deploying/running/healthy). Sourced from `@shipyard/core`'s display
+ * maps so labels + semantics stay the single source of truth.
  */
 export function StatusBadge({
   status,
@@ -89,21 +99,13 @@ export function StatusBadge({
   className,
 }: StatusBadgeProps): React.JSX.Element {
   const display = resolveDisplay(String(status), kind);
-  const variant = TOKEN_TO_VARIANT[display.color];
+  const tone = TOKEN_TO_TONE[display.color];
+  const live = display.isActive && (tone === "green" || tone === "blue");
 
   return (
-    <Badge variant={variant} className={cn("gap-1.5", className)}>
-      {showDot ? (
-        <span
-          className={cn(
-            "size-1.5 rounded-full",
-            TOKEN_TO_DOT[display.color],
-            display.isActive && "animate-pulse",
-          )}
-          aria-hidden
-        />
-      ) : null}
+    <span className={cn("badge", `b-${tone}`, live && "live", className)}>
+      {showDot ? <span className="bdot" /> : null}
       {display.label}
-    </Badge>
+    </span>
   );
 }

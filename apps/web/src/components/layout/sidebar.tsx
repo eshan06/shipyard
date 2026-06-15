@@ -1,89 +1,79 @@
 "use client";
 
+import { Anchor } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import * as React from "react";
 
-import { cn } from "@/lib/utils";
-
-import { NAV_ITEMS, isNavActive } from "./nav";
-
-/** The Shipyard wordmark + anchor logo. */
-function Wordmark(): React.JSX.Element {
-  return (
-    <Link
-      href="/"
-      className="flex items-center gap-2.5 px-2 text-lg font-semibold tracking-tight"
-    >
-      <span
-        className="flex size-8 items-center justify-center rounded-lg bg-primary text-base text-primary-foreground shadow-sm"
-        aria-hidden
-      >
-        ⚓
-      </span>
-      <span>Shipyard</span>
-    </Link>
-  );
-}
-
-/** Props for {@link SidebarNav}. */
-interface SidebarNavProps {
-  /** Called when a link is activated (used to close the mobile drawer). */
-  onNavigate?: () => void;
-}
-
-/** The shared list of navigation links (used by desktop + mobile). */
-export function SidebarNav({
-  onNavigate,
-}: SidebarNavProps): React.JSX.Element {
-  const pathname = usePathname();
-
-  return (
-    <nav className="flex flex-col gap-1" aria-label="Primary">
-      {NAV_ITEMS.map((item) => {
-        const active = isNavActive(item, pathname);
-        const Icon = item.icon;
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onNavigate}
-            aria-current={active ? "page" : undefined}
-            className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-              active
-                ? "bg-secondary text-foreground"
-                : "text-muted-foreground hover:bg-secondary/60 hover:text-foreground",
-            )}
-          >
-            <Icon className="size-4 shrink-0" />
-            {item.label}
-          </Link>
-        );
-      })}
-    </nav>
-  );
-}
+import { NAV_ITEMS, isNavActive } from "@/components/layout/nav";
+import { useDeployments, usePreviews } from "@/lib/hooks";
 
 /**
- * The desktop sidebar: the Shipyard wordmark, the primary navigation, and a
- * small footer note. Hidden below the `lg` breakpoint, where the {@link Topbar}
- * exposes a drawer instead.
+ * The redesigned ("engineering terminal") sidebar: brand mark + wordmark, a
+ * WORKSPACE nav group with live counts for Previews/Builds, and a footer status
+ * line. The active route gets the magenta soft background + indicator bar.
  */
 export function Sidebar(): React.JSX.Element {
+  const pathname = usePathname();
+  const previews = usePreviews({ limit: 100 });
+  const failed = useDeployments({ status: "FAILED", limit: 100 });
+
+  const counts: Record<string, number | undefined> = {
+    "/previews": previews.data?.data.length,
+    "/builds": failed.data?.data.length,
+  };
+
   return (
-    <aside className="hidden w-64 shrink-0 flex-col border-r bg-card/40 lg:flex">
-      <div className="flex h-16 items-center border-b px-4">
-        <Wordmark />
+    <aside className="sidebar">
+      <div className="brand">
+        <div className="brand-mark">
+          <Anchor size={20} strokeWidth={1.9} />
+        </div>
+        <div className="brand-text">
+          <span className="brand-name">Shipyard</span>
+          <span className="brand-sub">Preview Envs</span>
+        </div>
       </div>
-      <div className="flex-1 overflow-y-auto p-3">
-        <SidebarNav />
-      </div>
-      <div className="border-t p-4 text-xs text-muted-foreground">
-        Preview environments, on demand.
+
+      <nav className="nav">
+        <div className="nav-label">Workspace</div>
+        {NAV_ITEMS.map((item) => {
+          const active = isNavActive(item, pathname);
+          const Icon = item.icon;
+          const count = counts[item.href];
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={`nav-item${active ? " active" : ""}`}
+            >
+              <Icon size={17} />
+              <span>{item.label}</span>
+              {count != null ? (
+                <span className="nav-count tnum">{count}</span>
+              ) : null}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="sidebar-foot">
+        <div className="sysline">
+          <span
+            className="bdot pulse-dot"
+            style={{
+              background: "var(--green)",
+              color: "var(--green)",
+              width: 7,
+              height: 7,
+              borderRadius: "50%",
+              display: "inline-block",
+            }}
+          />
+          All systems operational
+        </div>
+        <div className="sysline-sub">region · iad1 · v2.8.0</div>
       </div>
     </aside>
   );
 }
-
-export { Wordmark };

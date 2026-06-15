@@ -14,17 +14,18 @@
  */
 
 import { load as parseYaml } from "js-yaml";
+
+import { InvalidPlanError } from "./errors.js";
 import {
-  PreviewPlan,
-  ServiceKind,
-  ServicePlan,
   ShipyardLabel,
   previewPlanSchema,
   servicePlanSchema,
   type Healthcheck,
   type PortMapping,
+  type PreviewPlan,
+  type ServiceKind,
+  type ServicePlan,
 } from "./types.js";
-import { InvalidPlanError } from "./errors.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Planner inputs

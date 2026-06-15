@@ -1,259 +1,264 @@
 "use client";
 
 import {
-  ChevronDown,
   ChevronRight,
-  GitCommit,
-  PartyPopper,
-  RotateCw,
+  CircleCheck,
+  Clock,
+  Github,
+  OctagonX,
+  RefreshCw,
   Search,
 } from "lucide-react";
-import Link from "next/link";
 import * as React from "react";
 import { toast } from "sonner";
 
-import { ConfirmDialog } from "@/components/confirm-dialog";
-import { PageHeader } from "@/components/page-header";
-import { EmptyState, ErrorState, LoadingSkeleton } from "@/components/states";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { CopyBtn, StatCard, Term, Toggle } from "@/components/sy";
 import { api, ApiError } from "@/lib/api";
 import { useDeployments } from "@/lib/hooks";
-import { absoluteTime, relativeTime } from "@/lib/time";
-import { cn, formatDuration, shortSha } from "@/lib/utils";
+import { relativeTime } from "@/lib/time";
+import { formatDuration, shortSha } from "@/lib/utils";
 
+import type { TermLine } from "@/components/sy";
 import type { Build, Deployment } from "@/lib/api-types";
-import type { BuildStatus } from "@shipyard/core";
 
-/** A deployment row that is guaranteed to carry a build summary. */
+/** A deployment row guaranteed to carry a build summary. */
 interface BuiltDeployment extends Deployment {
   build: Build;
 }
 
-/** Whether a deployment row has an attached build summary. */
+/** Whether a deployment has an attached build summary. */
 function hasBuild(d: Deployment): d is BuiltDeployment {
   return d.build != null;
 }
 
-/** Local display metadata for {@link BuildStatus} (core ships no build map). */
-const BUILD_STATUS_KIND: Record<
-  BuildStatus,
-  { label: string; variant: React.ComponentProps<typeof Badge>["variant"] }
-> = {
-  PENDING: { label: "Pending", variant: "muted" },
-  RUNNING: { label: "Running", variant: "info" },
-  SUCCEEDED: { label: "Succeeded", variant: "success" },
-  FAILED: { label: "Failed", variant: "destructive" },
-  CANCELLED: { label: "Cancelled", variant: "muted" },
-};
-
-/** A status pill for a build's lifecycle status. */
-function BuildStatusBadge({ status }: { status: BuildStatus }): React.JSX.Element {
-  const meta = BUILD_STATUS_KIND[status] ?? {
-    label: status,
-    variant: "muted" as const,
-  };
-  return <Badge variant={meta.variant}>{meta.label}</Badge>;
+/** Whether a built deployment represents a failed build. */
+function isFailed(d: BuiltDeployment): boolean {
+  return d.build.status === "FAILED" || d.status === "FAILED";
 }
 
 /**
- * The build error summary: a monospace block, truncated to one line by default
- * with an inline expand/collapse toggle when it overflows.
+ * Derive terminal log lines from a build's real error summary. Lines that read
+ * like an error are tinted red; everything else is dimmed. Falls back to a
+ * single placeholder line when the API gave us no summary.
  */
-function ErrorSummary({ text }: { text: string }): React.JSX.Element {
-  const [expanded, setExpanded] = React.useState(false);
-  const trimmed = text.trim();
+function logLines(d: BuiltDeployment): TermLine[] {
+  const summary = d.build.errorSummary ?? d.errorSummary ?? "";
+  const raw = summary
+    .split(/\r?\n/)
+    .map((l) => l.replace(/\s+$/, ""))
+    .filter((l) => l.length > 0);
+  if (raw.length === 0) {
+    return [{ text: "Build failed — no error summary captured.", tone: "dim" }];
+  }
+  return raw.map((text) => {
+    const looksError = /error|fail|cannot|exception|fatal|✖|✗/i.test(text);
+    return { text, tone: looksError ? "red" : "dim" };
+  });
+}
+
+/** Props for {@link BuildCard}. */
+interface BuildCardProps {
+  deployment: BuiltDeployment;
+  open: boolean;
+  onToggle: () => void;
+  retrying: boolean;
+  onRetry: () => void;
+}
+
+/** A single failed-build card: a collapsed summary row + expandable log. */
+function BuildCard({
+  deployment,
+  open,
+  onToggle,
+  retrying,
+  onRetry,
+}: BuildCardProps): React.JSX.Element {
+  const { build } = deployment;
+  const name = deployment.preview?.name ?? deployment.preview?.slug ?? "preview";
+  const slug = deployment.preview?.slug ?? "";
+  const errorText =
+    build.errorSummary ?? deployment.errorSummary ?? "Build failed";
+  const when = relativeTime(build.finishedAt ?? deployment.finishedAt);
+  const lines = logLines(deployment);
+  const exit = build.exitCode ?? 1;
 
   return (
-    <div className="max-w-xl">
-      <button
-        type="button"
-        onClick={() => setExpanded((e) => !e)}
-        aria-expanded={expanded}
-        className="group flex w-full items-start gap-1.5 rounded-md text-left text-destructive focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    <div
+      className="card"
+      style={{
+        overflow: "hidden",
+        borderColor: open ? "var(--line-strong)" : undefined,
+      }}
+    >
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns:
+            "minmax(160px,1fr) 120px minmax(0,2.4fr) 90px 120px auto",
+          alignItems: "center",
+          gap: 14,
+          padding: "15px 16px",
+          cursor: "pointer",
+        }}
+        onClick={onToggle}
       >
-        {expanded ? (
-          <ChevronDown className="mt-0.5 size-3.5 shrink-0 opacity-60 transition-colors group-hover:opacity-100" />
-        ) : (
-          <ChevronRight className="mt-0.5 size-3.5 shrink-0 opacity-60 transition-colors group-hover:opacity-100" />
-        )}
-        <code
-          className={cn(
-            "block min-w-0 flex-1 whitespace-pre-wrap break-words font-mono text-xs leading-relaxed",
-            !expanded && "truncate whitespace-nowrap",
-          )}
+        <div style={{ minWidth: 0 }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontWeight: 600,
+              fontSize: 13.5,
+            }}
+          >
+            <ChevronRight
+              size={14}
+              style={{
+                color: "var(--tx-faint)",
+                transform: open ? "rotate(90deg)" : "none",
+                transition: "transform .15s",
+                flex: "none",
+              }}
+            />
+            <span
+              style={{
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+                whiteSpace: "nowrap",
+              }}
+            >
+              {name}
+            </span>
+          </div>
+          {slug ? (
+            <div className="meta" style={{ marginTop: 5, paddingLeft: 22 }}>
+              <span className="truncate">{slug}</span>
+            </div>
+          ) : null}
+        </div>
+        <span className="mono" style={{ fontSize: 12, color: "var(--tx-mid)" }}>
+          {shortSha(deployment.commitSha)}
+        </span>
+        <div className="errline">
+          <ChevronRight size={13} className="chev" />
+          <span className="etext">{errorText}</span>
+        </div>
+        <span className="mono" style={{ fontSize: 12, color: "var(--tx-dim)" }}>
+          {formatDuration(build.durationMs)}
+        </span>
+        <span
+          className="mono"
+          style={{ fontSize: 12, color: "var(--tx-faint)" }}
         >
-          {trimmed}
-        </code>
-      </button>
+          {when}
+        </span>
+        <button
+          className="btn btn-outline btn-sm"
+          disabled={retrying}
+          onClick={(e) => {
+            e.stopPropagation();
+            onRetry();
+          }}
+        >
+          <RefreshCw size={13} className={retrying ? "spin" : undefined} />
+          Retry
+        </button>
+      </div>
+      {open ? (
+        <div style={{ padding: "0 16px 16px" }}>
+          <Term
+            title={`build log · ${shortSha(deployment.commitSha)} · exit ${exit}`}
+            tag="FAILED"
+            tagTone="red"
+            lines={lines}
+          />
+          <div style={{ display: "flex", gap: 9, marginTop: 12 }}>
+            <button
+              className="btn btn-primary btn-sm"
+              disabled={retrying}
+              onClick={onRetry}
+            >
+              <RefreshCw size={13} />
+              Retry build
+            </button>
+            <button className="btn btn-ghost btn-sm" disabled>
+              <Github size={13} />
+              Open PR
+            </button>
+            <span className="btn btn-outline btn-sm" style={{ gap: 6 }}>
+              <CopyBtn text={errorText} />
+              Copy log
+            </span>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
 
-/** Props for {@link BuildRow}. */
-interface BuildRowProps {
-  deployment: BuiltDeployment;
-  /** Whether to render the build status badge column (the "all" view). */
-  showStatus: boolean;
-  /** Whether a retry is currently in flight for this row. */
-  retrying: boolean;
-  /** Open the retry confirmation for this row. */
-  onRetry: () => void;
-}
-
-/** A single build row in the table. */
-function BuildRow({
-  deployment,
-  showStatus,
-  retrying,
-  onRetry,
-}: BuildRowProps): React.JSX.Element {
-  const { build } = deployment;
-  const previewName =
-    deployment.preview?.name ?? deployment.preview?.slug ?? "Unknown preview";
-  const canRetry =
-    build.status === "FAILED" || deployment.status === "FAILED";
-
-  return (
-    <TableRow>
-      {showStatus ? (
-        <TableCell className="align-top">
-          <Link href={`/deployments/${deployment.id}`}>
-            <BuildStatusBadge status={build.status} />
-          </Link>
-        </TableCell>
-      ) : null}
-      <TableCell className="align-top">
-        <Link
-          href={`/deployments/${deployment.id}`}
-          className="font-medium hover:underline"
-        >
-          {previewName}
-        </Link>
-      </TableCell>
-      <TableCell className="align-top">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="inline-flex items-center gap-1.5 font-mono text-xs">
-              <GitCommit className="size-3.5 shrink-0 text-muted-foreground" />
-              {shortSha(deployment.commitSha)}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent className="font-mono text-xs">
-            {deployment.commitSha}
-          </TooltipContent>
-        </Tooltip>
-      </TableCell>
-      <TableCell className="align-top">
-        {build.errorSummary ? (
-          <ErrorSummary text={build.errorSummary} />
-        ) : (
-          <span className="text-xs text-muted-foreground">
-            {build.status === "SUCCEEDED" ? "No errors" : "—"}
-          </span>
-        )}
-      </TableCell>
-      <TableCell className="align-top text-xs">
-        {formatDuration(build.durationMs)}
-      </TableCell>
-      <TableCell className="align-top text-xs text-muted-foreground">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span>
-              {relativeTime(build.finishedAt ?? deployment.queuedAt)}
-            </span>
-          </TooltipTrigger>
-          <TooltipContent>
-            {absoluteTime(build.finishedAt ?? deployment.queuedAt)}
-          </TooltipContent>
-        </Tooltip>
-      </TableCell>
-      <TableCell className="align-top text-right">
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={!canRetry || retrying}
-          onClick={onRetry}
-          aria-label={`Retry build for ${previewName}`}
-        >
-          <RotateCw className={cn("size-3.5", retrying && "animate-spin")} />
-          Retry
-        </Button>
-      </TableCell>
-    </TableRow>
-  );
-}
-
 /**
- * The Builds page: a failed-build-focused triage view. By default it lists
- * deployments whose container build failed — showing the preview, commit, the
- * build's error summary (monospace, expandable), when it failed, and a Retry
- * action that re-deploys the preview's current commit. A toggle reveals all
- * builds (succeeded + failed) with status badges. Renders loading, empty, and
- * error states.
+ * The Builds page: a failed-build triage view. It lists deployments whose
+ * container build failed — preview, commit, the build's error summary, when it
+ * failed, and a Retry action that re-deploys the preview's commit. A search
+ * filters by preview slug/commit and a toggle reveals all builds (not just
+ * failures). Renders loading, empty, and error states.
  */
 export default function BuildsPage(): React.JSX.Element {
-  const [showAll, setShowAll] = React.useState(false);
   const [query, setQuery] = React.useState("");
-  const [retryTarget, setRetryTarget] = React.useState<BuiltDeployment | null>(
-    null,
-  );
+  const [showAll, setShowAll] = React.useState(false);
+  const [openId, setOpenId] = React.useState<string | null>(null);
   const [retryingId, setRetryingId] = React.useState<string | null>(null);
 
-  // Fetch a generous page of recent deployments; each row carries a build
-  // summary. We filter to builds (and to failures) on the client so toggling
-  // views is instant and does not refetch.
   const deployments = useDeployments({ limit: 100 });
-
   const all = deployments.data?.data ?? [];
 
+  const built = React.useMemo(() => all.filter(hasBuild), [all]);
+
+  const failed = React.useMemo(() => built.filter(isFailed), [built]);
+
   const rows = React.useMemo(() => {
-    const withBuilds = all.filter(hasBuild);
-    const scoped = showAll
-      ? withBuilds
-      : withBuilds.filter((d) => d.build.status === "FAILED");
+    const scoped = showAll ? built : failed;
     const q = query.trim().toLowerCase();
     if (!q) return scoped;
     return scoped.filter((d) => {
-      const name = d.preview?.name ?? d.preview?.slug ?? "";
+      const slug = d.preview?.slug ?? "";
+      const name = d.preview?.name ?? "";
       return (
+        slug.toLowerCase().includes(q) ||
         name.toLowerCase().includes(q) ||
         d.commitSha.toLowerCase().includes(q)
       );
     });
-  }, [all, showAll, query]);
+  }, [built, failed, showAll, query]);
 
-  const failedCount = React.useMemo(
-    () => all.filter(hasBuild).filter((d) => d.build.status === "FAILED").length,
-    [all],
+  // Build-success rate across the deployments that carried a build summary.
+  const succeeded = React.useMemo(
+    () => built.filter((d) => d.build.status === "SUCCEEDED").length,
+    [built],
   );
+  const successPct =
+    built.length > 0 ? Math.round((succeeded / built.length) * 100) : null;
 
-  /** Re-deploy the preview behind a failed build, with a toast on completion. */
-  const confirmRetry = async (): Promise<void> => {
-    if (!retryTarget) return;
-    const target = retryTarget;
-    setRetryingId(target.id);
+  // Average build duration across builds that reported one.
+  const avgMs = React.useMemo(() => {
+    const durs = built
+      .map((d) => d.build.durationMs)
+      .filter((v): v is number => v != null);
+    if (durs.length === 0) return null;
+    return durs.reduce((a, b) => a + b, 0) / durs.length;
+  }, [built]);
+
+  const isFiltering = query.trim().length > 0;
+
+  /** Re-deploy the preview behind a failed build. */
+  const retry = async (d: BuiltDeployment): Promise<void> => {
+    setRetryingId(d.id);
     try {
-      await api.redeployPreview(target.previewId);
+      await api.redeployPreview(d.previewId);
       toast.success("Redeploy queued", {
-        description: target.preview?.name
-          ? `Rebuilding ${target.preview.name}.`
+        description: d.preview?.name
+          ? `Rebuilding ${d.preview.name}.`
           : undefined,
       });
       void deployments.mutate();
@@ -264,148 +269,154 @@ export default function BuildsPage(): React.JSX.Element {
     }
   };
 
-  const isFiltering = query.trim().length > 0;
-
   return (
-    <div className="space-y-6">
-      <PageHeader
-        title="Builds"
-        description="Triage failed container builds and re-run them in one click."
-        actions={
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                type="search"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Filter preview or commit"
-                aria-label="Filter builds by preview or commit"
-                className="w-[14rem] pl-8"
-              />
-            </div>
-            <div className="flex items-center gap-2">
-              <Switch
-                id="show-all-builds"
-                checked={showAll}
-                onCheckedChange={setShowAll}
-              />
-              <Label
-                htmlFor="show-all-builds"
-                className="cursor-pointer whitespace-nowrap text-sm font-normal text-muted-foreground"
-              >
-                Show all builds
-              </Label>
-            </div>
+    <div className="page fade-in">
+      <div className="phead">
+        <div className="phead-l">
+          <h1 className="ptitle">Builds</h1>
+          <p className="psub">
+            Triage failed container builds and re-run them in one click.
+          </p>
+        </div>
+        <div className="phead-r">
+          <div className="search">
+            <Search />
+            <input
+              placeholder="Filter preview or commit…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              aria-label="Filter builds by preview or commit"
+            />
           </div>
-        }
-      />
+          <Toggle on={showAll} onChange={setShowAll} label="Show all builds" />
+        </div>
+      </div>
 
-      {!deployments.isLoading && !deployments.error && !showAll ? (
-        <p className="text-sm text-muted-foreground">
-          {failedCount === 0
-            ? "All recent builds are passing."
-            : `${failedCount} failed ${failedCount === 1 ? "build" : "builds"} in the last 100 deployments.`}
-        </p>
-      ) : null}
+      <div className="grid cols-4" style={{ marginBottom: 18 }}>
+        <StatCard
+          label="Failed builds"
+          value={failed.length}
+          sub="last 100 deploys"
+          icon={OctagonX}
+        />
+        <StatCard
+          label="Build success"
+          value={successPct == null ? "—" : `${successPct}%`}
+          sub="rolling 100 deploys"
+          icon={CircleCheck}
+          iconTone="green"
+        />
+        <StatCard
+          label="Avg build time"
+          value={formatDuration(avgMs)}
+          sub="across builds"
+          icon={Clock}
+        />
+        <StatCard
+          label="Retries today"
+          value={0}
+          sub="this session"
+          icon={RefreshCw}
+          iconTone="blue"
+        />
+      </div>
 
       {deployments.isLoading ? (
-        <LoadingSkeleton rows={6} />
+        <div className="empty">Loading builds…</div>
       ) : deployments.error ? (
-        <ErrorState
-          description={deployments.error.message}
-          onRetry={() => void deployments.mutate()}
-        />
-      ) : rows.length === 0 ? (
-        isFiltering ? (
-          <EmptyState
-            icon={Search}
-            title="No matching builds"
-            description="No builds match your filter. Try a different preview name or commit."
-            action={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setQuery("")}
+        <div className="panel" style={{ padding: "13px 16px", marginBottom: 16 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 11 }}>
+            <span
+              className="stat-ic"
+              style={{
+                color: "var(--red)",
+                background: "var(--red-soft)",
+                borderColor: "var(--red-line)",
+              }}
+            >
+              <OctagonX size={15} />
+            </span>
+            <div>
+              <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                Couldn’t load builds
+              </div>
+              <div
+                style={{ color: "var(--tx-dim)", fontSize: 12, marginTop: 2 }}
               >
-                Clear filter
-              </Button>
-            }
-          />
-        ) : showAll ? (
-          <EmptyState
-            title="No builds yet"
-            description="Builds appear here as previews build and deploy."
-          />
-        ) : (
-          <EmptyState
-            icon={PartyPopper}
-            title="No failed builds 🎉"
-            description="Every recent build is green. Flip “Show all builds” to see the full history."
-            action={
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowAll(true)}
-              >
-                Show all builds
-              </Button>
-            }
-          />
-        )
+                {deployments.error.message}
+              </div>
+            </div>
+            <button
+              className="btn btn-outline btn-sm"
+              style={{ marginLeft: "auto" }}
+              onClick={() => void deployments.mutate()}
+            >
+              <RefreshCw size={13} />
+              Retry
+            </button>
+          </div>
+        </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                {showAll ? <TableHead className="w-[7rem]">Status</TableHead> : null}
-                <TableHead>Preview</TableHead>
-                <TableHead className="w-[8rem]">Commit</TableHead>
-                <TableHead>{showAll ? "Build" : "Error"}</TableHead>
-                <TableHead className="w-[6rem]">Duration</TableHead>
-                <TableHead className="w-[9rem]">When</TableHead>
-                <TableHead className="w-[6rem] text-right">Action</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {rows.map((d) => (
-                <BuildRow
+        <>
+          {!showAll && failed.length > 0 ? (
+            <div
+              className="panel"
+              style={{
+                padding: "13px 16px",
+                marginBottom: 16,
+                display: "flex",
+                alignItems: "center",
+                gap: 11,
+              }}
+            >
+              <span
+                className="stat-ic"
+                style={{
+                  color: "var(--red)",
+                  background: "var(--red-soft)",
+                  borderColor: "var(--red-line)",
+                }}
+              >
+                <OctagonX size={15} />
+              </span>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: 13.5 }}>
+                  {failed.length} failed{" "}
+                  {failed.length === 1 ? "build" : "builds"} in the last{" "}
+                  {built.length} deployments
+                </div>
+                <div
+                  style={{ color: "var(--tx-dim)", fontSize: 12, marginTop: 2 }}
+                >
+                  Expand a build to inspect its log, then retry to re-run the
+                  container build.
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {rows.length > 0 ? (
+              rows.map((d) => (
+                <BuildCard
                   key={d.id}
                   deployment={d}
-                  showStatus={showAll}
+                  open={openId === d.id}
+                  onToggle={() => setOpenId(openId === d.id ? null : d.id)}
                   retrying={retryingId === d.id}
-                  onRetry={() => setRetryTarget(d)}
+                  onRetry={() => void retry(d)}
                 />
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              ))
+            ) : isFiltering ? (
+              <div className="empty">No builds match “{query}”.</div>
+            ) : showAll ? (
+              <div className="empty">No builds yet.</div>
+            ) : (
+              <div className="empty">No failed builds.</div>
+            )}
+          </div>
+        </>
       )}
-
-      <ConfirmDialog
-        open={retryTarget !== null}
-        onOpenChange={(open) => {
-          if (!open) setRetryTarget(null);
-        }}
-        title="Retry this build?"
-        description={
-          <>
-            This re-deploys{" "}
-            <span className="font-medium text-foreground">
-              {retryTarget?.preview?.name ??
-                retryTarget?.preview?.slug ??
-                "the preview"}
-            </span>{" "}
-            at commit{" "}
-            <span className="font-mono text-foreground">
-              {shortSha(retryTarget?.commitSha)}
-            </span>
-            , queuing a fresh build and deploy.
-          </>
-        }
-        confirmLabel="Retry build"
-        onConfirm={confirmRetry}
-      />
     </div>
   );
 }

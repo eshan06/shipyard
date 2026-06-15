@@ -110,7 +110,15 @@ export type WorkerConfig = Readonly<
  *   validation fails — surfaced once at startup so the operator can fix them all.
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): WorkerConfig {
-  const parsed = ConfigSchema.safeParse(env);
+  // Treat a blank env var as unset, so empty `.env` placeholders fall through to
+  // `.optional()`/`.default()` instead of being coerced (e.g. an empty
+  // `COST_PER_VCPU_HOUR=` would otherwise coerce to 0, not undefined). Keeps
+  // "unset" and "empty" equivalent across every field. Mirrors the API config.
+  const compact: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined && value !== "") compact[key] = value;
+  }
+  const parsed = ConfigSchema.safeParse(compact);
   if (!parsed.success) {
     const lines = parsed.error.issues
       .map((issue) => {

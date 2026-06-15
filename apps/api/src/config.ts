@@ -160,7 +160,17 @@ export type AppConfig = Readonly<z.infer<typeof ConfigSchema>>;
  *   validation fails — surfaced once at startup so the operator can fix them all.
  */
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = ConfigSchema.safeParse(env);
+  // Treat a blank env var as unset. `.env` files (and `.env.example`) routinely
+  // ship keys with empty values as documentation placeholders (e.g.
+  // `ANALYTICS_HTTP_ENDPOINT=`); an empty string is "present" to zod, so it
+  // would fail stricter optional validators like `.url()` instead of falling
+  // through to `.optional()`/`.default()`. Stripping blanks here makes "unset"
+  // and "empty" mean the same thing across every field.
+  const compact: NodeJS.ProcessEnv = {};
+  for (const [key, value] of Object.entries(env)) {
+    if (value !== undefined && value !== "") compact[key] = value;
+  }
+  const parsed = ConfigSchema.safeParse(compact);
   if (!parsed.success) {
     const lines = parsed.error.issues
       .map((issue) => {

@@ -282,7 +282,8 @@ export const deploymentsRoutes: FastifyPluginAsyncZod = async (app) => {
       });
 
       // The cursor pagination helper does not project includes, so load the
-      // builds for this page in one query and stitch them in.
+      // builds + a lightweight preview reference for this page in one query each
+      // and stitch them in.
       const builds =
         page.data.length === 0
           ? []
@@ -291,11 +292,21 @@ export const deploymentsRoutes: FastifyPluginAsyncZod = async (app) => {
             });
       const buildByDeployment = new Map(builds.map((b) => [b.deploymentId, b]));
 
+      const previews =
+        page.data.length === 0
+          ? []
+          : await app.prisma.preview.findMany({
+              where: { id: { in: page.data.map((d) => d.previewId) } },
+              select: { id: true, slug: true, name: true },
+            });
+      const previewById = new Map(previews.map((p) => [p.id, p]));
+
       return {
         data: page.data.map((deployment) =>
           toDeploymentDto({
             ...deployment,
             build: buildByDeployment.get(deployment.id) ?? null,
+            preview: previewById.get(deployment.previewId),
           }),
         ),
         nextCursor: page.nextCursor,
@@ -384,24 +395,31 @@ export const deploymentsRoutes: FastifyPluginAsyncZod = async (app) => {
           : null;
 
       const finishedAt = new Date();
-      const [deployment] = await app.prisma.$transaction([
-        app.prisma.deployment.update({
-          where: { id },
-          data: { status: "CANCELLED", finishedAt },
-          include: {
-            build: true,
-            preview: { select: { id: true, slug: true, name: true } },
-          },
-        }),
-        ...(cancellableBuild
-          ? [
+      // The deployment.update carries the `include: { build }` used to build the
+      // response DTO. When a build is also being cancelled, it MUST be flipped
+      // first so the deployment's included build snapshot reflects the cancelled
+      // status; Prisma runs an array transaction sequentially, so ordering the
+      // build update before the deployment update keeps the response consistent
+      // with persisted state.
+      const cancelDeployment = app.prisma.deployment.update({
+        where: { id },
+        data: { status: "CANCELLED", finishedAt },
+        include: {
+          build: true,
+          preview: { select: { id: true, slug: true, name: true } },
+        },
+      });
+      const deployment = cancellableBuild
+        ? (
+            await app.prisma.$transaction([
               app.prisma.build.update({
                 where: { id: cancellableBuild.id },
                 data: { status: "CANCELLED", finishedAt },
               }),
-            ]
-          : []),
-      ]);
+              cancelDeployment,
+            ])
+          )[1]
+        : await cancelDeployment;
 
       await writeAudit(app.prisma, {
         teamId,

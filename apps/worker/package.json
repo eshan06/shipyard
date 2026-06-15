@@ -6,7 +6,7 @@
   "description": "Shipyard background workers: deploy, destroy/cleanup, cost roll-ups, log relay (BullMQ).",
   "main": "dist/index.js",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
+    "dev": "dotenv -e ../../.env -- tsx watch src/index.ts",
     "build": "tsup",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",

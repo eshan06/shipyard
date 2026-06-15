@@ -48,7 +48,11 @@ export interface AnalyticsClientOptions {
   enabled?: boolean;
   /** Auto-flush once the buffer reaches this size. Defaults to 10. */
   batchSize?: number;
-  /** Cap on buffered events (oldest dropped past this). Defaults to 100. */
+  /**
+   * Cap on buffered events (oldest dropped past this). Defaults to 50 — the
+   * server's `/telemetry` batch limit — so a single drained payload is always
+   * within what the route accepts.
+   */
   maxBuffer?: number;
   /** Injectable clock (tests). Defaults to `() => new Date()`. */
   now?: () => Date;
@@ -64,6 +68,12 @@ export interface AnalyticsClient {
   flush(): Promise<void>;
   /** Remove and return all buffered events (used for `sendBeacon` on unload). */
   drain(): AnalyticsClientEvent[];
+  /**
+   * Push already-stamped events back onto the front of the buffer, preserving
+   * their original timestamps. Used to re-queue a drained batch when a beacon
+   * send fails (so occurrence time isn't rewritten).
+   */
+  enqueue(events: AnalyticsClientEvent[]): void;
   /** The current number of buffered events (for tests/diagnostics). */
   readonly size: number;
 }
@@ -82,7 +92,7 @@ export function createAnalyticsClient(
     transport,
     enabled = true,
     batchSize = 10,
-    maxBuffer = 100,
+    maxBuffer = 50,
     now = () => new Date(),
     onTrack,
   } = options;
@@ -132,6 +142,11 @@ export function createAnalyticsClient(
       const events = buffer;
       buffer = [];
       return events;
+    },
+    enqueue(events): void {
+      if (!enabled || events.length === 0) return;
+      buffer = [...events, ...buffer];
+      trim();
     },
     get size(): number {
       return buffer.length;
@@ -244,12 +259,13 @@ export function flushAnalyticsBeacon(): void {
     });
     const ok = beacon(`${API_BASE}/telemetry`, blob);
     if (!ok) {
-      // Beacon rejected (e.g. payload too large): re-queue + retry via fetch.
-      events.forEach((e) => client.track(e.name, e.properties));
+      // Beacon rejected (e.g. payload too large): re-queue (preserving the
+      // original timestamps) and retry via fetch.
+      client.enqueue(events);
       void client.flush();
     }
   } catch {
-    events.forEach((e) => client.track(e.name, e.properties));
+    client.enqueue(events);
     void client.flush();
   }
 }

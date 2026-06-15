@@ -82,6 +82,20 @@ describe("createAnalyticsClient", () => {
     expect(client.size).toBe(0);
   });
 
+  it("enqueue() re-queues events at the front, preserving their original timestamps", () => {
+    const client = createAnalyticsClient({ transport: recordingTransport(), batchSize: 999, now: fixedNow });
+    client.track("later");
+    const earlier: AnalyticsClientEvent = {
+      name: "earlier",
+      properties: { id: 1 },
+      ts: "2020-01-01T00:00:00.000Z",
+    };
+    client.enqueue([earlier]);
+    const drained = client.drain();
+    expect(drained.map((e) => e.name)).toEqual(["earlier", "later"]);
+    expect(drained[0]!.ts).toBe("2020-01-01T00:00:00.000Z"); // not rewritten
+  });
+
   it("caps the buffer to maxBuffer, dropping the oldest events", () => {
     const client = createAnalyticsClient({ transport: recordingTransport(), maxBuffer: 2, batchSize: 999 });
     client.track("a");

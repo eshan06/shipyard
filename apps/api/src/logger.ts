@@ -21,6 +21,24 @@ import type { PinoLoggerOptions } from "fastify/types/logger.js";
 export function buildLoggerOptions(config: AppConfig): PinoLoggerOptions {
   const options: PinoLoggerOptions = { level: config.LOG_LEVEL };
 
+  // Defence-in-depth: censor common secret-ish keys if they ever reach a log
+  // line (e.g. via analytics event `properties`). Upstream schemas should keep
+  // these out; this is a backstop so a stray secret is never logged in clear.
+  options.redact = {
+    paths: [
+      "properties.password",
+      "properties.token",
+      "properties.secret",
+      "properties.apiKey",
+      "properties.authorization",
+      "*.password",
+      "*.token",
+      "*.secret",
+      "*.authorization",
+    ],
+    censor: "[redacted]",
+  };
+
   if (config.NODE_ENV !== "production") {
     options.transport = {
       target: "pino-pretty",

@@ -22,8 +22,20 @@ import type { FastifyPluginAsyncZod } from "fastify-type-provider-zod";
 const TelemetryEventSchema = z.object({
   /** Event name in snake_case (bounded to keep cardinality sane). */
   name: z.string().min(1).max(120),
-  /** Arbitrary JSON-serializable properties. */
-  properties: z.record(z.unknown()).optional(),
+  /**
+   * Flat, scalar-valued properties. Bounding key count, key/value length, and
+   * disallowing nested objects keeps a client from inflating log/sink volume or
+   * smuggling deep payloads through telemetry.
+   */
+  properties: z
+    .record(
+      z.string().max(64),
+      z.union([z.string().max(2048), z.number(), z.boolean(), z.null()]),
+    )
+    .refine((p) => Object.keys(p).length <= 50, {
+      message: "properties may contain at most 50 keys",
+    })
+    .optional(),
   /** Client ISO-8601 timestamp of when the event occurred. */
   ts: z.string().datetime().optional(),
 });

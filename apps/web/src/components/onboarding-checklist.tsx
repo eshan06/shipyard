@@ -21,9 +21,8 @@ import {
 } from "@/lib/onboarding";
 import { cn } from "@/lib/utils";
 
-/** localStorage keys: dismissed permanently, and completed-event fired once. */
+/** localStorage key: the checklist was permanently dismissed. */
 const DISMISS_KEY = "shipyard.onboarding.dismissed";
-const COMPLETED_KEY = "shipyard.onboarding.completed";
 
 /** A single checklist row. */
 function StepRow({ step }: { step: OnboardingStep }): React.JSX.Element {
@@ -93,40 +92,55 @@ export function OnboardingChecklist(): React.JSX.Element | null {
   });
   const progress = onboardingProgress(steps);
 
-  // Fire `onboarding_completed` exactly once, when all steps are first done.
-  React.useEffect(() => {
-    if (!mounted || !progress.complete) return;
-    try {
-      if (localStorage.getItem(COMPLETED_KEY) === "1") return;
-      localStorage.setItem(COMPLETED_KEY, "1");
-    } catch {
-      /* ignore */
-    }
-    trackEvent(ANALYTICS_EVENTS.onboardingCompleted, { steps: progress.total });
-  }, [mounted, progress.complete, progress.total]);
+  // Every contributing signal must have SETTLED before we trust completion: the
+  // token/env queries only begin once me/projects resolve (null SWR keys until
+  // then), so a step can read "not done" merely because its query is still in
+  // flight. Treat a skipped (null-key) or errored query as settled.
+  const previewsSettled =
+    previews.data !== undefined || previews.error !== undefined;
+  const tokensSettled =
+    teamId === null || tokens.data !== undefined || tokens.error !== undefined;
+  const envSettled =
+    firstProjectId === null ||
+    projectEnv.data !== undefined ||
+    projectEnv.error !== undefined;
+  const dataReady =
+    !!me.data && !!projects.data && previewsSettled && tokensSettled && envSettled;
 
-  // Fire `onboarding_step_completed` when a step transitions to done in-session
-  // (not on the initial load — we snapshot the starting state first).
+  // Emit onboarding analytics only for GENUINE in-session transitions. We
+  // snapshot the starting state once every signal has settled — so an
+  // already-onboarded team (on any device) emits no historical events — then
+  // fire step/completed events as steps flip to done during this session.
   const doneSnapshot = React.useRef<Set<string> | null>(null);
+  const completedFired = React.useRef(false);
   const doneKey = steps
     .filter((s) => s.done)
     .map((s) => s.key)
     .join(",");
   React.useEffect(() => {
-    if (!mounted || !projects.data) return;
+    if (!mounted || !dataReady) return;
     const done = new Set(steps.filter((s) => s.done).map((s) => s.key));
+
+    // Capture the baseline exactly once, after all signals have settled.
     if (doneSnapshot.current === null) {
       doneSnapshot.current = done;
+      if (progress.complete) completedFired.current = true; // already onboarded
       return;
     }
+
     for (const key of done) {
       if (!doneSnapshot.current.has(key)) {
         trackEvent(ANALYTICS_EVENTS.onboardingStepCompleted, { step: key });
       }
     }
     doneSnapshot.current = done;
+
+    if (progress.complete && !completedFired.current) {
+      completedFired.current = true;
+      trackEvent(ANALYTICS_EVENTS.onboardingCompleted, { steps: progress.total });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doneKey, mounted]);
+  }, [mounted, dataReady, doneKey]);
 
   const dismiss = (): void => {
     try {
@@ -144,7 +158,7 @@ export function OnboardingChecklist(): React.JSX.Element | null {
   // Avoid hydration flicker / nagging: render nothing until mounted, while the
   // first signals load, once dismissed, or once fully complete.
   if (!mounted || dismissed) return null;
-  if (!projects.data || !me.data) return null;
+  if (!dataReady) return null;
   if (progress.complete) return null;
 
   return (

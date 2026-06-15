@@ -178,6 +178,11 @@ class PostHogSink extends NetworkSink {
     event: AnalyticsEvent & { timestamp: string },
   ): Promise<void> {
     const url = `${this.host.replace(/\/+$/, "")}/capture/`;
+    // Strip client-controlled PostHog-reserved (`$`-prefixed) keys so a client
+    // can't override $lib, $ip, $set, etc. via event properties.
+    const safeProps = Object.fromEntries(
+      Object.entries(event.properties ?? {}).filter(([k]) => !k.startsWith("$")),
+    );
     const payload = {
       api_key: this.apiKey,
       event: event.name,
@@ -185,7 +190,7 @@ class PostHogSink extends NetworkSink {
       distinct_id: event.distinctId ?? "anonymous",
       timestamp: event.timestamp,
       properties: {
-        ...event.properties,
+        ...safeProps,
         teamId: event.teamId,
         source: event.source,
         $lib: "shipyard",

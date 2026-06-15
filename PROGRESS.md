@@ -1,7 +1,10 @@
 # Shipyard — Build Progress & Backlog
 
-**Status:** Phases 0–7 complete. Near production-ready. See `docs/RETURN_HANDOFF.md`.
-**Last updated:** 2026-06-15 (polish track — legal pack, analytics seam, onboarding)
+**Status:** Phases 0–7 complete; runnable, redesigned, perf-tuned, all gates green.
+**→ For the production roadmap and next steps, see [`docs/GO_LIVE.md`](docs/GO_LIVE.md)**
+(and [`docs/RESUME_PROMPT.md`](docs/RESUME_PROMPT.md) to resume). `docs/RETURN_HANDOFF.md` predates
+the 2026-06-15 redesign/run-readiness session and is partly stale.
+**Last updated:** 2026-06-15 (run-readiness + engineering-terminal redesign + perf + go-live audit)
 
 ## Build note (for resuming agents)
 Moving off OneDrive did NOT fix the filesystem: the working tree

@@ -7,6 +7,7 @@ import { AuthGuard } from "@/components/auth-guard";
 import { CommandPaletteProvider } from "@/components/command-palette";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Topbar } from "@/components/layout/topbar";
+import { RoutePrewarm } from "@/components/route-prewarm";
 
 /**
  * The authenticated dashboard shell ("engineering terminal" redesign): a fixed
@@ -25,6 +26,7 @@ export default function DashboardLayout({
     <AuthGuard>
       <AnalyticsProvider>
         <CommandPaletteProvider>
+          <RoutePrewarm />
           <div className="app">
             <Sidebar />
             <div className="main">

@@ -32,6 +32,11 @@ export function Providers({
           dedupingInterval: 2000,
           revalidateOnReconnect: true,
           keepPreviousData: true,
+          // Don't refetch every active hook each time the window regains focus
+          // (alt-tabbing back fired a burst of requests that felt laggy). Data
+          // still revalidates on mount, navigation, and reconnect; live views
+          // (logs/status) use their own SSE streams, not focus polling.
+          revalidateOnFocus: false,
         }}
       >
         <TooltipProvider delayDuration={200}>{children}</TooltipProvider>

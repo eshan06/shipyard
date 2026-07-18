@@ -5,40 +5,84 @@
 # Dockerfiles. It is meant for a single-host deployment or a staging box; for
 # multi-node use the Kubernetes manifests in infra/k8s/.
 #
-# Quick start (from the repo root):
+# Quick start (from the repo ROOT):
 #   1. Copy and fill the env file:   cp .env.example .env
 #      - SECRETS_ENCRYPTION_KEY:  openssl rand -base64 32
 #      - SESSION_SECRET:          openssl rand -hex 32
-#      - Set DATABASE_URL / REDIS_URL to the in-network service names (below).
+#      - GITHUB_WEBHOOK_SECRET:   the shared secret configured in your GitHub App
+#      - DEPLOY_DRIVER=docker     (only if you want real preview stacks; see below)
 #   2. Build images:    docker compose -f infra/docker/docker-compose.prod.yml build
-#   3. Run migrations:  docker compose -f infra/docker/docker-compose.prod.yml run --rm migrate
-#   4. Start the stack: docker compose -f infra/docker/docker-compose.prod.yml up -d
+#   3. Start the stack: docker compose -f infra/docker/docker-compose.prod.yml up -d
 #
-# The `migrate` service is a one-off (profile: tools) that runs
-# `prisma migrate deploy` and exits; api/worker only start once it has succeeded
-# in step 3. See docs/DEPLOYMENT.md and docs/RUNBOOK.md.
+# ── How env reaches the containers (this is the part that used to bite) ──────
+# There are two distinct mechanisms and they do NOT read the same file:
 #
-# NOTE: inside this network, services reach each other by name, so the api/worker
-# must use DATABASE_URL=...@postgres:5432/... and REDIS_URL=redis://redis:6379.
-# These are provided as defaults below and can be overridden in .env.
+#   * `env_file: ../../.env` (per service) injects the REPO-ROOT .env into the
+#     container at runtime. It is an explicit path, so it always finds the file
+#     you created with `cp .env.example .env` — no `--env-file` flag required.
+#     ALL application config (SECRETS_ENCRYPTION_KEY, SESSION_SECRET, PUBLIC_*_URL,
+#     PREVIEW_BASE_DOMAIN, DEV_AUTH, RATE_LIMIT_*, GITHUB_* creds/webhook secret,
+#     DEPLOY_DRIVER, DOCKER_HOST, WORKER_CONCURRENCY, PREVIEW_*, COST_*, …) flows
+#     in this way, so an operator value in .env always reaches the app.
+#
+#   * `environment:` (per service) is Compose-level and takes precedence OVER
+#     env_file. We therefore keep ONLY the handful of container-internal values
+#     here that must not be taken from a local-dev .env: the in-network
+#     DATABASE_URL/REDIS_URL service wiring, NODE_ENV=production, and the fixed
+#     API_HOST/API_PORT/web PORT. `${VAR}` interpolation in this file is resolved
+#     from your shell env (and, if you pass `--env-file`, that file) — it is NOT
+#     the repo-root .env by default.
+#
+# IMPORTANT — DATABASE_URL / REDIS_URL:
+#   The repo-root .env ships these pointing at `localhost` (correct for running
+#   the API/worker on the HOST via `pnpm dev` against the dev docker-compose.yml).
+#   Inside this stack the apps run in containers and must reach the data stores by
+#   service name, so the `environment:` block below pins the in-network defaults
+#   (`postgres:5432` / `redis:6379`), overriding the localhost values from .env.
+#   To point at a MANAGED database/cache, export the override in your shell before
+#   `up` (interpolation picks it up), e.g.:
+#       export DATABASE_URL='postgresql://user:pass@managed-host:5432/shipyard?schema=public'
+#       export REDIS_URL='rediss://managed-cache:6380'
+#       docker compose -f infra/docker/docker-compose.prod.yml up -d
+#   (and drop the bundled postgres/redis services). Do NOT rely on the repo-root
+#   .env values for these two — they are the host-dev localhost values.
+#
+# Migrations self-order: the `migrate` service runs `prisma migrate deploy` and
+# exits 0; api and worker `depends_on` it with `service_completed_successfully`,
+# so a plain `up -d` always migrates the schema BEFORE the apps start. It is
+# idempotent (a no-op when the schema is current). See docs/DEPLOYMENT.md and
+# docs/RUNBOOK.md.
 # ──────────────────────────────────────────────────────────────────────────
 name: shipyard
 
+# Bounded json-file logging on every service so a long-lived single host does not
+# fill its disk. Attach with `logging: *default-logging`. This also matters
+# because the single-host `docker` deploy driver runs untrusted preview stacks on
+# the same daemon — capping log volume is a basic guardrail.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# Container-internal wiring shared by api / worker / migrate. Everything ELSE the
+# apps read comes from env_file (../../.env); only these must be pinned so a
+# local-dev .env cannot leak the wrong values into the stack.
 x-app-env: &app-env
-  # Shared, in-network connection strings. The `${VAR:-default}` form lets .env
-  # override them while keeping the stack runnable out of the box.
+  # In-network service names. Defaults keep the stack runnable out of the box;
+  # override for a managed DB/cache by EXPORTING these in your shell (see header).
   DATABASE_URL: ${DATABASE_URL:-postgresql://shipyard:shipyard@postgres:5432/shipyard?schema=public}
   REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-  SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?set SECRETS_ENCRYPTION_KEY in .env (openssl rand -base64 32)}
-  NODE_ENV: ${NODE_ENV:-production}
-  LOG_LEVEL: ${LOG_LEVEL:-info}
-  PREVIEW_BASE_DOMAIN: ${PREVIEW_BASE_DOMAIN:-preview.localhost}
+  # Always production for this stack, regardless of the .env default (which is
+  # `development` for local, non-Docker work).
+  NODE_ENV: production
 
 services:
   # ── Data stores ──────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    logging: *default-logging
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-shipyard}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-shipyard}
@@ -51,10 +95,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1024M
+        reservations:
+          memory: 256M
 
   redis:
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *default-logging
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - redisdata:/data
@@ -64,17 +116,30 @@ services:
       interval: 5s
       timeout: 3s
       retries: 12
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
 
-  # ── One-off DB migration (run before first boot / on every deploy) ─────────
-  # Runs `prisma migrate deploy` against DATABASE_URL and exits. Invoke with:
+  # ── DB migration (runs once before api/worker on every `up`) ───────────────
+  # Reuses the API image (it carries the Prisma schema, generated client and the
+  # prisma CLI) to run `prisma migrate deploy` against DATABASE_URL, then exits 0.
+  # api/worker gate on its success (`service_completed_successfully`), so `up -d`
+  # self-orders migrations. Idempotent, so leaving it in the default `up` path is
+  # safe. Run it on its own with:
   #   docker compose -f infra/docker/docker-compose.prod.yml run --rm migrate
-  # It is gated behind a profile so it never starts as part of `up`.
   migrate:
-    profiles: ["tools"]
     image: ${API_IMAGE:-shipyard-api:latest}
     build:
       context: ../..
       dockerfile: apps/api/Dockerfile
+    logging: *default-logging
+    # migrate only needs DATABASE_URL (from *app-env); env_file is harmless and
+    # keeps it consistent with api/worker if a migration ever reads more config.
+    env_file:
+      - path: ../../.env
+        required: false
     environment:
       <<: *app-env
     command:
@@ -83,7 +148,13 @@ services:
       postgres:
         condition: service_healthy
     networks: [shipyard]
+    # Run-once task: never restart it as if it were a long-lived service.
     restart: "no"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
 
   # ── API (Fastify control plane) ───────────────────────────────────────────
   api:
@@ -92,22 +163,21 @@ services:
       context: ../..
       dockerfile: apps/api/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
+    # All app config comes from the repo-root .env (SECRETS_ENCRYPTION_KEY,
+    # SESSION_SECRET, PUBLIC_*_URL, PREVIEW_BASE_DOMAIN, DEV_AUTH, RATE_LIMIT_*,
+    # GITHUB_OAUTH_*, GITHUB_WEBHOOK_SECRET, …). The app validates it at startup
+    # and fails fast with a list of any missing/invalid vars.
     env_file:
       - path: ../../.env
         required: false
     environment:
       <<: *app-env
+      # Fixed container-internal bind address + port. The PUBLISHED host port is
+      # ${API_PORT:-4000} (see ports:), but the app always listens on 4000 inside
+      # the container, so pin it here regardless of any API_PORT in .env.
       API_HOST: 0.0.0.0
       API_PORT: 4000
-      PUBLIC_API_URL: ${PUBLIC_API_URL:-http://localhost:4000}
-      PUBLIC_APP_URL: ${PUBLIC_APP_URL:-http://localhost:3000}
-      SESSION_SECRET: ${SESSION_SECRET:?set SESSION_SECRET in .env (openssl rand -hex 32)}
-      DEV_AUTH: ${DEV_AUTH:-false}
-      RATE_LIMIT_MAX: ${RATE_LIMIT_MAX:-200}
-      RATE_LIMIT_WINDOW: ${RATE_LIMIT_WINDOW:-1 minute}
-      GITHUB_OAUTH_CLIENT_ID: ${GITHUB_OAUTH_CLIENT_ID:-}
-      GITHUB_OAUTH_CLIENT_SECRET: ${GITHUB_OAUTH_CLIENT_SECRET:-}
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
     ports:
       - "${API_PORT:-4000}:4000"
     depends_on:
@@ -115,6 +185,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks: [shipyard]
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
@@ -122,6 +194,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 256M
 
   # ── Worker (BullMQ deploy / destroy / cleanup / cost) ─────────────────────
   worker:
@@ -130,24 +209,18 @@ services:
       context: ../..
       dockerfile: apps/worker/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
+    # App config from the repo-root .env: SECRETS_ENCRYPTION_KEY, DEPLOY_DRIVER,
+    # DOCKER_HOST, WORKER_CONCURRENCY, PREVIEW_*, COST_*, LOG_LEVEL, …
     env_file:
       - path: ../../.env
         required: false
     environment:
       <<: *app-env
-      DEPLOY_DRIVER: ${DEPLOY_DRIVER:-mock}
-      DOCKER_HOST: ${DOCKER_HOST:-}
-      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-4}
-      CLEANUP_INTERVAL_MS: ${CLEANUP_INTERVAL_MS:-60000}
-      COST_INTERVAL_MS: ${COST_INTERVAL_MS:-300000}
-      PREVIEW_AUTO_STOP_MINUTES: ${PREVIEW_AUTO_STOP_MINUTES:-120}
-      PREVIEW_DESTROY_TTL_MINUTES: ${PREVIEW_DESTROY_TTL_MINUTES:-60}
-      COST_PER_VCPU_HOUR: ${COST_PER_VCPU_HOUR:-0.04}
-      COST_PER_GB_MEM_HOUR: ${COST_PER_GB_MEM_HOUR:-0.005}
-      COST_PER_GB_STORAGE_HOUR: ${COST_PER_GB_STORAGE_HOUR:-0.0002}
-      COST_PER_GB_EGRESS: ${COST_PER_GB_EGRESS:-0.09}
-    # The `docker` deploy driver needs access to a Docker daemon to build/run
-    # preview stacks. Uncomment to bind the host socket (single-host only):
+    # The `docker` deploy driver needs a Docker daemon to build/run preview
+    # stacks. Set DEPLOY_DRIVER=docker in .env and uncomment to bind the host
+    # socket (single-host only — this grants the worker root-equivalent access to
+    # the host daemon):
     # volumes:
     #   - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
@@ -155,7 +228,16 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     networks: [shipyard]
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 768M
+        reservations:
+          memory: 256M
 
   # ── Web (Next.js dashboard) ───────────────────────────────────────────────
   web:
@@ -164,11 +246,16 @@ services:
       context: ../..
       dockerfile: apps/web/Dockerfile
     restart: unless-stopped
+    logging: *default-logging
     environment:
-      NODE_ENV: ${NODE_ENV:-production}
+      NODE_ENV: production
       PORT: 3000
-      # Read at runtime by next.config.mjs rewrites — point the browser's
+      # Read at RUNTIME by next.config.mjs rewrites — point the browser's
       # same-origin /api/v1 proxy at the API service (in-network name `api`).
+      # NOTE: any client-referenced NEXT_PUBLIC_* (e.g. NEXT_PUBLIC_DEPLOY_DRIVER,
+      # NEXT_PUBLIC_DEV_AUTH, NEXT_PUBLIC_ANALYTICS_*) are inlined at image BUILD
+      # time by `next build`, so those must be passed as Docker build-args, NOT
+      # set here. This runtime value only feeds the server-side rewrite target.
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:4000}
     ports:
       - "${WEB_PORT:-3000}:3000"
@@ -182,6 +269,13 @@ services:
       timeout: 5s
       retries: 5
       start_period: 25s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          memory: 256M
 
 networks:
   shipyard:

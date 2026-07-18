@@ -30,8 +30,14 @@ spec:
     spec:
       containers:
         - name: web
-          # Replace OWNER + tag with your registry/image.
-          image: ghcr.io/OWNER/shipyard-web:latest
+          # Substitution point — see infra/k8s/README.md. OWNER → your GHCR
+          # namespace; REPLACE_TAG → the immutable release tag CI pushed. NOTE the
+          # web image bakes NEXT_PUBLIC_* at BUILD time (build-args), so the
+          # NEXT_PUBLIC_API_URL below only feeds the server-side Next rewrite.
+          image: ghcr.io/OWNER/shipyard-web:REPLACE_TAG
+          # Safe with an IMMUTABLE tag: a fresh REPLACE_TAG is never cached on the
+          # node, so it is always pulled on rollout. If you deploy a MUTABLE tag
+          # (e.g. `latest`) instead, change this to `Always`.
           imagePullPolicy: IfNotPresent
           ports:
             - name: http

@@ -2,7 +2,9 @@
 # Non-secret configuration for the Shipyard control plane.
 #
 # Secrets (DATABASE_URL, REDIS_URL, SECRETS_ENCRYPTION_KEY, SESSION_SECRET,
-# GitHub creds) live in the Secret (20-secret.yaml) — NOT here. The in-cluster
+# GitHub creds) live in the `shipyard-secrets` Secret, created out-of-band — NOT
+# here, and NOT from the `20-secret.example.yaml` template (see infra/k8s/README.md
+# and DEPLOYMENT.md §4). The in-cluster
 # DNS names below assume Postgres/Redis run inside the cluster (e.g. via the
 # Bitnami charts or the StatefulSet of your choice) reachable at `postgres` /
 # `redis`. If you use a managed DB/cache, drop those connection strings into the

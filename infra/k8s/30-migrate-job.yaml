@@ -33,8 +33,12 @@ spec:
       restartPolicy: Never
       containers:
         - name: migrate
-          # Replace OWNER + tag with your registry/image (pin to the release tag).
-          image: ghcr.io/OWNER/shipyard-api:latest
+          # Substitution point — see infra/k8s/README.md.
+          #   OWNER       → your GHCR namespace (github.com/<owner>)
+          #   REPLACE_TAG → the immutable release tag CI pushed (e.g. v1.4.0 or the
+          #                 git SHA). Use the SAME tag as api/worker/web so the Job
+          #                 runs the migrations that match the rollout.
+          image: ghcr.io/OWNER/shipyard-api:REPLACE_TAG
           command:
             ["node_modules/.bin/prisma", "migrate", "deploy", "--schema", "packages/db/prisma/schema.prisma"]
           envFrom:

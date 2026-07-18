@@ -37,8 +37,12 @@ spec:
       terminationGracePeriodSeconds: 60
       containers:
         - name: worker
-          # Replace OWNER + tag with your registry/image.
-          image: ghcr.io/OWNER/shipyard-worker:latest
+          # Substitution point — see infra/k8s/README.md. OWNER → your GHCR
+          # namespace; REPLACE_TAG → the immutable release tag CI pushed.
+          image: ghcr.io/OWNER/shipyard-worker:REPLACE_TAG
+          # Safe with an IMMUTABLE tag: a fresh REPLACE_TAG is never cached on the
+          # node, so it is always pulled on rollout. If you deploy a MUTABLE tag
+          # (e.g. `latest`) instead, change this to `Always`.
           imagePullPolicy: IfNotPresent
           envFrom:
             - configMapRef:

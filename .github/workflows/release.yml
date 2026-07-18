@@ -1,0 +1,105 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Release — build and push the three Shipyard images to GHCR.
+#
+# WHAT IT DOES
+#   On a pushed git tag `v*` (e.g. `v1.4.0`), builds all three images from the
+#   repo root and pushes them to the GitHub Container Registry as:
+#       ghcr.io/<owner>/shipyard-api:<tag>     + :latest
+#       ghcr.io/<owner>/shipyard-worker:<tag>  + :latest
+#       ghcr.io/<owner>/shipyard-web:<tag>     + :latest
+#   `<owner>` is `${{ github.repository_owner }}` (lower-cased for GHCR). The
+#   immutable `<tag>` is what the k8s manifests pin via REPLACE_TAG — see
+#   infra/k8s/README.md. `latest` is also moved for convenience (single-host
+#   compose / quick pulls); do NOT rely on it for k8s (use the immutable tag).
+#
+#   Can also be run manually (workflow_dispatch) with an explicit tag, e.g. to
+#   re-publish or cut a one-off image.
+#
+# PERMISSIONS / SECRETS
+#   Uses ONLY the built-in `GITHUB_TOKEN` (no PATs, no external secrets). The
+#   `packages: write` permission below lets that token push to GHCR under this
+#   repository's owner. Ensure GHCR package visibility/linkage is enabled for the
+#   repo (Settings → Actions → Workflow permissions, and the package settings).
+#
+# WEB BUILD-ARGS
+#   The web image inlines `NEXT_PUBLIC_*` at BUILD time (next build), so they are
+#   passed as build-args here — they cannot be set at container runtime. Point
+#   NEXT_PUBLIC_API_URL at your public API origin and set NEXT_PUBLIC_DEPLOY_DRIVER
+#   to `docker` for real deployments. Override via workflow_dispatch inputs.
+# ──────────────────────────────────────────────────────────────────────────
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to publish (e.g. v1.4.0). Defaults to the git ref."
+        required: false
+        type: string
+      next_public_api_url:
+        description: "NEXT_PUBLIC_API_URL baked into the web image."
+        required: false
+        default: "https://api.shipyard.example.com"
+        type: string
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  release:
+    name: Build & push (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [api, worker, web]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Lower-case the owner: GHCR repository paths must be lower-case, but
+      # `github.repository_owner` can contain upper-case characters.
+      - name: Resolve image name and tag
+        id: meta
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          tag="${{ github.event.inputs.tag }}"
+          if [ -z "$tag" ]; then tag="${GITHUB_REF_NAME}"; fi
+          echo "image=${REGISTRY}/${owner}/shipyard-${{ matrix.app }}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & push ${{ matrix.app }}
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/${{ matrix.app }}/Dockerfile
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}
+            ${{ steps.meta.outputs.image }}:latest
+          # Only the web image consumes these; api/worker ignore unknown ARGs.
+          build-args: |
+            NEXT_PUBLIC_API_URL=${{ github.event.inputs.next_public_api_url || 'https://api.shipyard.example.com' }}
+            NEXT_PUBLIC_DEPLOY_DRIVER=docker
+          cache-from: type=gha,scope=${{ matrix.app }}
+          cache-to: type=gha,scope=${{ matrix.app }},mode=max

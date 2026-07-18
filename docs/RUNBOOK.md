@@ -185,10 +185,16 @@ Redis pub/sub → SSE to the dashboard.
 
 ### Migration / schema drift (`column ... does not exist`)
 
-- The DB schema is behind the code. Run the migration step
-  (`prisma migrate deploy`) — the Compose `migrate` service or the k8s
-  `shipyard-migrate` Job — **before** rolling out api/worker. (You'll see this as
-  `prisma:error ... column X does not exist` in logs against an un-migrated DB.)
+- The DB schema is behind the code. Migrations run via `prisma migrate deploy`:
+  - **Compose:** the `migrate` service runs it automatically and api/worker
+    `depends_on` its successful completion, so `up -d` self-orders migrations
+    before the apps start. Re-run on demand with
+    `docker compose -f infra/docker/docker-compose.prod.yml run --rm migrate`.
+  - **Kubernetes:** apply the `shipyard-migrate` Job and wait for it to complete
+    **before** rolling out api/worker (a completed Job is immutable — delete or
+    re-tag it per release).
+- (You'll see drift as `prisma:error ... column X does not exist` in logs against
+  an un-migrated DB.)
 
 ### Budget alerts / runaway cost
 

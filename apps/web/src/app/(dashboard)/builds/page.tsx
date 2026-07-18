@@ -4,7 +4,6 @@ import {
   ChevronRight,
   CircleCheck,
   Clock,
-  Github,
   OctagonX,
   RefreshCw,
   Search,
@@ -91,10 +90,8 @@ function BuildCard({
       }}
     >
       <div
+        className="build-row"
         style={{
-          display: "grid",
-          gridTemplateColumns:
-            "minmax(160px,1fr) 120px minmax(0,2.4fr) 90px 120px auto",
           alignItems: "center",
           gap: 14,
           padding: "15px 16px",
@@ -181,10 +178,6 @@ function BuildCard({
             >
               <RefreshCw size={13} />
               Retry build
-            </button>
-            <button className="btn btn-ghost btn-sm" disabled>
-              <Github size={13} />
-              Open PR
             </button>
             <span className="btn btn-outline btn-sm" style={{ gap: 6 }}>
               <CopyBtn text={errorText} />

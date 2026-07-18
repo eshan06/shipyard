@@ -7,7 +7,6 @@ import {
   GitBranch,
   GitPullRequest,
   Globe,
-  Plus,
   Zap,
 } from "lucide-react";
 import Link from "next/link";
@@ -171,10 +170,6 @@ export default function PreviewsPage(): React.JSX.Element {
             icon={Filter}
             width={180}
           />
-          <button className="btn btn-primary">
-            <Plus size={15} />
-            New preview
-          </button>
         </div>
       </div>
 

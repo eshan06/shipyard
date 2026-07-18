@@ -9,7 +9,6 @@ import {
   GitCommit,
   Globe,
   Layers,
-  Plus,
   Rocket,
 } from "lucide-react";
 import Link from "next/link";
@@ -214,13 +213,9 @@ export default function OverviewPage(): React.JSX.Element {
           </p>
         </div>
         <div className="phead-r">
-          <Link className="btn btn-ghost" href="/previews">
+          <Link className="btn btn-primary" href="/previews">
             <Layers size={15} />
             View previews
-          </Link>
-          <Link className="btn btn-primary" href="/previews/new">
-            <Plus size={15} />
-            New preview
           </Link>
         </div>
       </div>

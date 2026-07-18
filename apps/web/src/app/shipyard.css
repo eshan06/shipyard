@@ -568,8 +568,27 @@ body {
 
 @media (max-width: 1180px) {
   .cols-4 { grid-template-columns: repeat(2,1fr); }
+  /* Match the previews grid's 3→2→1 step (projects use .cols-3) instead of
+     jumping straight from 3 to 1 columns at the phone breakpoint. */
+  .cols-3 { grid-template-columns: repeat(2,1fr); }
   .pv-grid { grid-template-columns: repeat(2,1fr); }
   .two-col { grid-template-columns: 1fr; }
+}
+
+/* Build-list row: a dense multi-column grid on desktop that collapses to a
+   name + actions layout on phones so it never overflows the viewport. */
+.build-row {
+  display: grid;
+  grid-template-columns: minmax(160px,1fr) 120px minmax(0,2.4fr) 90px 120px auto;
+}
+@media (max-width: 720px) {
+  /* Collapse to name + chevron; the status/message/duration/time columns are
+     available in the card's expandable detail, so no info is lost. */
+  .build-row { grid-template-columns: minmax(0,1fr) auto; }
+  .build-row > :nth-child(2),
+  .build-row > :nth-child(3),
+  .build-row > :nth-child(4),
+  .build-row > :nth-child(5) { display: none; }
 }
 
 /* ---------- phones: collapse the sidebar so it doesn't eat the screen ---------- */

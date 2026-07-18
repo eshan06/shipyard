@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Filter, GitBranch, Github, Plus, Search } from "lucide-react";
+import { Box, Filter, GitBranch, Github, Search } from "lucide-react";
 import Link from "next/link";
 import * as React from "react";
 
@@ -215,10 +215,6 @@ export default function ProjectsPage(): React.JSX.Element {
             icon={Filter}
             width={170}
           />
-          <button className="btn btn-primary">
-            <Plus size={15} />
-            Connect repo
-          </button>
         </div>
       </div>
 
@@ -232,34 +228,13 @@ export default function ProjectsPage(): React.JSX.Element {
         <div className="empty">
           {query.trim()
             ? "No projects match your search."
-            : "No projects yet. Connect a repository to get started."}
+            : "No projects yet. Projects are created when the Shipyard GitHub App is installed on a repository."}
         </div>
       ) : (
         <div className="grid cols-3">
           {items.map((p) => (
             <ProjectCard key={p.id} p={p} counts={countsFor(p)} />
           ))}
-          <div className="card proj-new">
-            <div style={{ textAlign: "center", color: "var(--tx-dim)" }}>
-              <Plus size={22} style={{ color: "var(--acc-bright)" }} />
-              <div
-                style={{
-                  fontSize: 13,
-                  fontWeight: 600,
-                  color: "var(--tx-mid)",
-                  marginTop: 8,
-                }}
-              >
-                Connect a repository
-              </div>
-              <div
-                style={{ fontSize: 11.5, marginTop: 3 }}
-                className="mono"
-              >
-                github · gitlab · bitbucket
-              </div>
-            </div>
-          </div>
         </div>
       )}
     </div>

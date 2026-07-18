@@ -34,9 +34,14 @@ import type {
   PreviewStatus,
 } from "@shipyard/core";
 
-/** Default SWR config: revalidate on focus, retry only non-auth errors. */
+/**
+ * Default per-hook SWR config: retry only non-auth errors. Revalidation policy
+ * (dedupe, keepPreviousData, revalidateOnFocus:false) is set once globally in
+ * the SWRConfig provider — this must NOT re-specify `revalidateOnFocus`, or it
+ * would override the global "off" on every hook and re-introduce the alt-tab
+ * refetch storm the provider deliberately disables.
+ */
 const baseConfig: SWRConfiguration = {
-  revalidateOnFocus: true,
   shouldRetryOnError: (err: unknown) =>
     !(err instanceof ApiError && err.isUnauthorized),
 };

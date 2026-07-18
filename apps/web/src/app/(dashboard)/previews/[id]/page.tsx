@@ -52,7 +52,6 @@ import {
   usePreviewDeployments,
   usePreviewEnv,
   usePreviewReviews,
-  usePreviewServices,
 } from "@/lib/hooks";
 import { previewOpenTarget } from "@/lib/preview-link";
 import { usePreviewStatus } from "@/lib/sse";
@@ -301,12 +300,17 @@ export default function PreviewDetailPage(): React.JSX.Element {
   const params = useParams<{ id: string }>();
   const id = params.id;
 
+  // Active tab drives lazy data fetching: the preview detail response already
+  // includes `services` inline, and the other tabs' data is only fetched once
+  // that tab is opened — so opening the page costs 2 requests (preview +
+  // deployments-for-logs), not 6.
+  const [tab, setTab] = React.useState("services");
+
   const { data: preview, error, isLoading, mutate } = usePreview(id);
-  const services = usePreviewServices(id);
-  const deployments = usePreviewDeployments(id);
-  const reviews = usePreviewReviews(id);
-  const env = usePreviewEnv(id);
-  const costs = usePreviewCosts(id);
+  const deployments = usePreviewDeployments(id); // also feeds the live-logs panel
+  const reviews = usePreviewReviews(tab === "reviewers" ? id : null);
+  const env = usePreviewEnv(tab === "env" ? id : null);
+  const costs = usePreviewCosts(tab === "cost" ? id : null);
 
   // Live status overlays the fetched snapshot for instant updates.
   const { event: statusEvent } = usePreviewStatus(id);
@@ -347,7 +351,7 @@ export default function PreviewDetailPage(): React.JSX.Element {
       <div className="space-y-6">
         {/* Tabbed detail */}
         <div>
-          <Tabs defaultValue="services">
+          <Tabs value={tab} onValueChange={setTab}>
             <TabsList className="flex w-full flex-wrap justify-start">
               <TabsTrigger value="services">
                 Services
@@ -366,16 +370,12 @@ export default function PreviewDetailPage(): React.JSX.Element {
               <TabsTrigger value="cost">Cost</TabsTrigger>
             </TabsList>
 
-            {/* Services */}
+            {/* Services (included inline in the preview detail response) */}
             <TabsContent value="services" className="mt-4 space-y-3">
-              {(preview.services.length > 0
-                ? preview.services
-                : services.data?.data ?? []
-              ).map((s) => (
+              {preview.services.map((s) => (
                 <ServiceRow key={s.id} s={s} />
               ))}
-              {preview.services.length === 0 &&
-              (services.data?.data.length ?? 0) === 0 ? (
+              {preview.services.length === 0 ? (
                 <p className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
                   No services have been provisioned yet.
                 </p>

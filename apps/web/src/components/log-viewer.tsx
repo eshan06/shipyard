@@ -36,8 +36,16 @@ function ConnectionPill({ state }: { state: StreamState }): React.JSX.Element {
   );
 }
 
-/** A single rendered log line. */
-function LogLine({ line }: { line: LogEvent }): React.JSX.Element {
+/**
+ * A single rendered log line. Memoized so appending a new line only mounts the
+ * one new row instead of re-rendering the entire (up to thousands of lines)
+ * buffer on every SSE message — keys are stable `seq`s so React reconciles by row.
+ */
+const LogLine = React.memo(function LogLine({
+  line,
+}: {
+  line: LogEvent;
+}): React.JSX.Element {
   return (
     <div className="flex gap-3 px-3 py-0.5 hover:bg-white/5">
       <span className="shrink-0 select-none text-muted-foreground/60">
@@ -54,7 +62,15 @@ function LogLine({ line }: { line: LogEvent }): React.JSX.Element {
       <span className="whitespace-pre-wrap break-all">{line.message}</span>
     </div>
   );
-}
+});
+
+/**
+ * Cap on the number of log rows kept in the DOM. The stream buffer may hold more
+ * (older lines stay in memory for backfill), but rendering only the tail keeps
+ * the node count — and layout/paint cost — bounded on chatty deploys. The viewer
+ * auto-scrolls to the newest line, so the tail is what the user sees.
+ */
+const MAX_RENDERED_LINES = 1500;
 
 /** Props for {@link LogViewer}. */
 export interface LogViewerProps {
@@ -147,7 +163,20 @@ export function LogViewer({
               : "No deployment to stream."}
           </div>
         ) : (
-          logs.map((line) => <LogLine key={line.seq} line={line} />)
+          <>
+            {logs.length > MAX_RENDERED_LINES ? (
+              <div className="px-3 py-1 text-center text-[11px] text-muted-foreground/60">
+                … showing the latest {MAX_RENDERED_LINES.toLocaleString()} of{" "}
+                {logs.length.toLocaleString()} lines
+              </div>
+            ) : null}
+            {(logs.length > MAX_RENDERED_LINES
+              ? logs.slice(-MAX_RENDERED_LINES)
+              : logs
+            ).map((line) => (
+              <LogLine key={line.seq} line={line} />
+            ))}
+          </>
         )}
       </div>
     </div>

@@ -124,7 +124,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     // merged under the caller's headers, and credentials is always included.
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      // Only advertise a JSON body when there actually is one. A bodyless
+      // request (GET, and crucially DELETE) that still sends
+      // `Content-Type: application/json` makes the API's JSON body parser reject
+      // it with 400 "Body cannot be empty" — which silently broke every revoke /
+      // delete action.
+      ...(init?.body != null ? { "Content-Type": "application/json" } : {}),
       Accept: "application/json",
       ...(init?.headers ?? {}),
     },

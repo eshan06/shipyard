@@ -1,9 +1,13 @@
 "use client";
 
-import { KeyRound, Plus, Shield, Trash2, Users } from "lucide-react";
+import { KeyRound, Plus, Shield, ShieldAlert, Trash2, Users } from "lucide-react";
 import * as React from "react";
+import { toast } from "sonner";
 
+import { ConfirmDialog } from "@/components/confirm-dialog";
 import { CopyBtn } from "@/components/sy";
+import { ANALYTICS_EVENTS, trackEvent } from "@/lib/analytics";
+import { api, ApiError } from "@/lib/api";
 import { useMe, useTeamTokens } from "@/lib/hooks";
 import { absoluteTime, relativeTime } from "@/lib/time";
 import { formatUsd, initials } from "@/lib/utils";
@@ -12,6 +16,19 @@ import { canManage, useActiveTeam } from "./_components/use-active-team";
 
 import type { ApiToken } from "@/lib/api-types";
 import type { MembershipRole } from "@shipyard/core";
+
+/** Minimal dark-terminal input styling (no shared `.input` class exists). */
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  background: "var(--bg-elev, #0e1015)",
+  border: "1px solid var(--line)",
+  borderRadius: 7,
+  color: "var(--tx)",
+  fontFamily: "var(--mono)",
+  fontSize: 13,
+  padding: "8px 10px",
+  outline: "none",
+};
 
 /** Deterministic magenta→blue gradient for a member avatar tile. */
 function avatarGradient(seed: string): string {
@@ -44,6 +61,54 @@ export default function TeamSettingsPage(): React.JSX.Element {
 
   const user = me.data?.user;
   const team = active?.team;
+
+  // ── API-token create/revoke state (terminal-styled, inline) ────────────────
+  const [createOpen, setCreateOpen] = React.useState(false);
+  const [tokenName, setTokenName] = React.useState("");
+  const [tokenExpiry, setTokenExpiry] = React.useState("");
+  const [creating, setCreating] = React.useState(false);
+  const [rawToken, setRawToken] = React.useState<string | null>(null);
+  const [revoking, setRevoking] = React.useState<ApiToken | null>(null);
+
+  const resetCreate = React.useCallback(() => {
+    setCreateOpen(false);
+    setTokenName("");
+    setTokenExpiry("");
+    setRawToken(null);
+    setCreating(false);
+  }, []);
+
+  const handleCreate = async (): Promise<void> => {
+    if (!teamId || tokenName.trim().length === 0 || creating) return;
+    setCreating(true);
+    try {
+      const result = await api.createTeamToken(teamId, {
+        name: tokenName.trim(),
+        expiresAt: tokenExpiry ? new Date(tokenExpiry).toISOString() : undefined,
+      });
+      setRawToken(result.token);
+      trackEvent(ANALYTICS_EVENTS.apiTokenCreated, { teamId });
+      toast.success(`Created ${result.apiToken.name}`);
+      void tokens.mutate();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to create token");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const handleRevoke = async (): Promise<void> => {
+    if (!teamId || !revoking) return;
+    try {
+      await api.revokeTeamToken(teamId, revoking.id);
+      trackEvent(ANALYTICS_EVENTS.apiTokenRevoked, { teamId });
+      toast.success(`Revoked ${revoking.name}`);
+      void tokens.mutate();
+    } catch (err) {
+      toast.error(err instanceof ApiError ? err.message : "Failed to revoke token");
+      throw err;
+    }
+  };
 
   return (
     <div className="page fade-in">
@@ -122,12 +187,6 @@ export default function TeamSettingsPage(): React.JSX.Element {
                   <Users size={16} />
                   Members
                 </span>
-                <span className="panel-act">
-                  <button className="btn btn-ghost btn-sm">
-                    <Plus size={13} />
-                    Invite
-                  </button>
-                </span>
               </div>
               <div style={{ padding: "8px 14px 12px" }}>
                 {user ? (
@@ -182,13 +241,130 @@ export default function TeamSettingsPage(): React.JSX.Element {
               </span>
               <span className="panel-act">
                 {canManage(role) ? (
-                  <button className="btn btn-primary btn-sm" type="button">
+                  <button
+                    className="btn btn-primary btn-sm"
+                    type="button"
+                    onClick={() => {
+                      setCreateOpen((o) => !o);
+                      setRawToken(null);
+                    }}
+                  >
                     <Plus size={13} />
                     Create token
                   </button>
                 ) : null}
               </span>
             </div>
+
+            {createOpen && canManage(role) ? (
+              <div
+                style={{
+                  padding: "14px 18px",
+                  borderBottom: "1px solid var(--line-soft)",
+                }}
+              >
+                {rawToken === null ? (
+                  <div style={{ display: "grid", gap: 12, maxWidth: 460 }}>
+                    <div style={{ display: "grid", gap: 5 }}>
+                      <label
+                        htmlFor="tk-name"
+                        style={{ fontSize: 12, color: "var(--tx-dim)" }}
+                      >
+                        Name
+                      </label>
+                      <input
+                        id="tk-name"
+                        style={inputStyle}
+                        value={tokenName}
+                        onChange={(e) => setTokenName(e.target.value)}
+                        placeholder="CI pipeline"
+                        autoComplete="off"
+                        spellCheck={false}
+                      />
+                    </div>
+                    <div style={{ display: "grid", gap: 5 }}>
+                      <label
+                        htmlFor="tk-exp"
+                        style={{ fontSize: 12, color: "var(--tx-dim)" }}
+                      >
+                        Expiry <span style={{ color: "var(--tx-faint)" }}>(optional)</span>
+                      </label>
+                      <input
+                        id="tk-exp"
+                        type="date"
+                        style={inputStyle}
+                        value={tokenExpiry}
+                        min={new Date(Date.now() + 86_400_000).toISOString().slice(0, 10)}
+                        onChange={(e) => setTokenExpiry(e.target.value)}
+                      />
+                    </div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        type="button"
+                        disabled={tokenName.trim().length === 0 || creating}
+                        onClick={() => void handleCreate()}
+                      >
+                        {creating ? "Creating…" : "Create token"}
+                      </button>
+                      <button
+                        className="btn btn-ghost btn-sm"
+                        type="button"
+                        onClick={resetCreate}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 11, maxWidth: 560 }}>
+                    <div
+                      role="alert"
+                      style={{
+                        display: "flex",
+                        gap: 9,
+                        alignItems: "flex-start",
+                        padding: "10px 12px",
+                        borderRadius: 8,
+                        border: "1px solid var(--warn, #b7791f)",
+                        background: "rgba(183,121,31,0.12)",
+                        fontSize: 12.5,
+                      }}
+                    >
+                      <ShieldAlert size={15} style={{ marginTop: 1, flexShrink: 0 }} />
+                      <span>
+                        Copy this token now and store it securely — it is shown once and
+                        cannot be recovered.
+                      </span>
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <code
+                        className="mono"
+                        style={{
+                          ...inputStyle,
+                          overflowX: "auto",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {rawToken}
+                      </code>
+                      <CopyBtn text={rawToken} />
+                    </div>
+                    <div>
+                      <button className="btn btn-outline btn-sm" type="button" onClick={resetCreate}>
+                        Done
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
 
             {tokens.isLoading ? (
               <div className="empty">Loading tokens…</div>
@@ -242,6 +418,7 @@ export default function TeamSettingsPage(): React.JSX.Element {
                             type="button"
                             style={{ marginLeft: "auto" }}
                             aria-label={`Revoke ${tk.name}`}
+                            onClick={() => setRevoking(tk)}
                           >
                             <Trash2 size={13} />
                           </button>
@@ -269,6 +446,16 @@ export default function TeamSettingsPage(): React.JSX.Element {
               </span>
             </div>
           </div>
+
+          <ConfirmDialog
+            open={revoking !== null}
+            onOpenChange={(o) => (o ? null : setRevoking(null))}
+            title={`Revoke ${revoking?.name ?? "token"}?`}
+            description="Any integration using this token will immediately lose access. This cannot be undone."
+            confirmLabel="Revoke token"
+            confirmVariant="destructive"
+            onConfirm={handleRevoke}
+          />
         </>
       )}
     </div>

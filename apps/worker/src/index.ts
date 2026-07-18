@@ -139,14 +139,16 @@ async function main(): Promise<void> {
   // BullMQ requeues the in-flight work.
   process.on("uncaughtException", (err) => {
     logger.fatal({ err }, "uncaught exception; shutting down");
-    void shutdown("uncaughtException");
+    // Exit NON-ZERO so a supervisor with an on-failure restart policy restarts
+    // us and BullMQ requeues the in-flight work (a signal-driven shutdown exits 0).
+    void shutdown("uncaughtException", 1);
   });
 
   /** Force-exit budget so a hung close() cannot wedge the process forever. */
   const SHUTDOWN_TIMEOUT_MS = 30_000;
 
   let shuttingDown = false;
-  const shutdown = async (signal: string): Promise<void> => {
+  const shutdown = async (signal: string, exitCode = 0): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     logger.info({ signal }, "shutting down shipyard worker");
@@ -183,7 +185,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     logger.info("shutdown complete");
-    process.exit(0);
+    process.exit(exitCode);
   };
 
   process.on("SIGINT", () => void shutdown("SIGINT"));

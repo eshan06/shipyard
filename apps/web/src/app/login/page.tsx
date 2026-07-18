@@ -40,8 +40,11 @@ const DEMO_ACCOUNTS: ReadonlyArray<{ email: string; role: string }> = [
 
 /** Resolve a safe in-app redirect target from the `?next=` param. */
 function safeNext(next: string | null): string {
-  // Only allow same-origin, absolute in-app paths (block `//evil.com` etc.).
-  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+  // Only allow same-origin, absolute in-app paths. Block both `//evil.com` and
+  // the backslash form `/\evil.com` (browsers normalize `\` to `/`, so the
+  // latter is also protocol-relative → an open redirect). Require a single
+  // leading `/` NOT followed by another `/` or `\`.
+  if (next && /^\/(?![/\\])/.test(next) && !next.includes("\\")) return next;
   return "/";
 }
 

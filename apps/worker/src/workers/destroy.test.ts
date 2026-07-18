@@ -104,4 +104,16 @@ describe("processDestroyJob", () => {
     expect(tables.services[0]!.status).toBe("HEALTHY");
     expect(events.statuses).toHaveLength(0);
   });
+
+  it("reason 'failed' reaps resources but leaves the preview status unchanged (redeployable)", async () => {
+    const { deps, tables, events } = buildDeps(seed("FAILED"));
+    await processDestroyJob({ previewId: "prev-1", reason: "failed" }, deps);
+
+    // Preview stays FAILED (not DESTROYED); service rows marked STOPPED; no
+    // status transition published.
+    expect(tables.previews[0]!.status).toBe("FAILED");
+    expect(tables.previews[0]!.destroyedAt).toBeNull();
+    expect(tables.services[0]!.status).toBe("STOPPED");
+    expect(events.statuses).toHaveLength(0);
+  });
 });

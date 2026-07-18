@@ -569,6 +569,13 @@ export class DockerDriver {
       ended = true;
       wake();
     });
+    // `destroy()` (from the AbortSignal path) tears the socket down and emits
+    // `close` — but not necessarily `end`/`error`. Without handling it the
+    // generator's wait would never resolve and the async iterator would hang.
+    stream.on("close", () => {
+      ended = true;
+      wake();
+    });
 
     try {
       while (true) {

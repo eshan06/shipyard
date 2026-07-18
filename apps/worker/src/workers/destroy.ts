@@ -90,6 +90,22 @@ export async function processDestroyJob(
   }
 
   const teamId = await teamIdForProject(db, preview.projectId);
+
+  // "failed": reap the docker resources a failed/stranded deploy left running,
+  // but leave the preview row's status untouched (it is already FAILED and
+  // should stay redeployable). Neither a terminal DESTROY nor an idle STOP fits.
+  if (job.reason === "failed") {
+    try {
+      await orchestrator.destroy(preview.id);
+    } catch (error) {
+      log.error({ err: error }, "orchestrator reap (failed) errored");
+      throw error;
+    }
+    await stopServiceRows(db, preview.id);
+    log.info("reaped resources for a failed preview (status unchanged)");
+    return;
+  }
+
   const terminal = TERMINAL_REASONS.has(job.reason);
 
   if (terminal) {

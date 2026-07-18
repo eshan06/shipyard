@@ -39,10 +39,11 @@ async function metricsPlugin(app: FastifyInstance): Promise<void> {
   });
 
   app.addHook("onResponse", async (request, reply) => {
-    // Prefer the matched route template (`/api/v1/previews/:id`) over the raw
-    // URL so per-id paths don't explode the metric's label cardinality.
-    const route =
-      (request.routeOptions?.url as string | undefined) ?? request.url.split("?")[0] ?? UNMATCHED_ROUTE;
+    // Use ONLY the matched route template (`/api/v1/previews/:id`) as the label.
+    // Unmatched requests (404s from scanners hitting random paths) have no
+    // template — bucket them under a single constant, never the raw URL, or the
+    // label cardinality is unbounded.
+    const route = (request.routeOptions?.url as string | undefined) ?? UNMATCHED_ROUTE;
     if (route === "/metrics") return; // don't measure the scrape itself
     const labels = {
       method: request.method,

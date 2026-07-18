@@ -159,7 +159,7 @@ describe("runCleanupTick", () => {
     expect(added[0]?.data).toEqual({ previewId: "prev-idle", reason: "idle" });
   });
 
-  it("reconciles a preview stranded mid-deploy: fails it and enqueues teardown", async () => {
+  it("reconciles a preview stranded mid-deploy (latest deployment terminal): fails it + reaps", async () => {
     const stale = new Date(NOW.getTime() - 999 * 60_000);
     const previews: Row[] = [
       {
@@ -173,7 +173,11 @@ describe("runCleanupTick", () => {
         pullRequest: null,
       },
     ];
-    const { client, tables } = createFakePrisma({ previews });
+    // The job finished (deployment FAILED) but the preview row was never updated.
+    const deployments: Row[] = [
+      { id: "dep-stuck", previewId: "prev-stuck", status: "FAILED", queuedAt: stale },
+    ];
+    const { client, tables } = createFakePrisma({ previews, deployments });
     const added: Array<{ data: unknown }> = [];
     const destroyQueue = {
       add: async (_name: string, data: unknown) => (added.push({ data }), { id: "1" }),
@@ -182,7 +186,38 @@ describe("runCleanupTick", () => {
     await runCleanupTick({ prisma: client, destroyQueue, config, logger: testLogger() }, NOW);
 
     expect(tables.previews[0]!.status).toBe("FAILED");
-    expect(added.some((a) => (a.data as { previewId: string }).previewId === "prev-stuck")).toBe(true);
+    const reap = added.find((a) => (a.data as { previewId: string }).previewId === "prev-stuck");
+    expect(reap).toBeDefined();
+    // Reap uses the "failed" reason so the preview stays redeployable (not DESTROYED).
+    expect((reap!.data as { reason: string }).reason).toBe("failed");
+  });
+
+  it("does NOT fail a slow-but-running deploy (latest deployment still in flight)", async () => {
+    const stale = new Date(NOW.getTime() - 999 * 60_000);
+    const previews: Row[] = [
+      {
+        id: "prev-slow",
+        status: "BUILDING",
+        isPinned: false,
+        lastActivityAt: stale,
+        updatedAt: stale, // stale row, but the job is still building
+        autoStopMinutes: 120,
+        project: { destroyTtlMinutes: 60 },
+        pullRequest: null,
+      },
+    ];
+    const deployments: Row[] = [
+      { id: "dep-slow", previewId: "prev-slow", status: "BUILDING", queuedAt: stale },
+    ];
+    const { client, tables } = createFakePrisma({ previews, deployments });
+    const added: unknown[] = [];
+    const destroyQueue = { add: async (_n: string, d: unknown) => (added.push(d), { id: "1" }) } as unknown as Queue;
+
+    await runCleanupTick({ prisma: client, destroyQueue, config, logger: testLogger() }, NOW);
+
+    // The in-flight build is left alone — not clobbered to FAILED.
+    expect(tables.previews[0]!.status).toBe("BUILDING");
+    expect(added).toHaveLength(0);
   });
 
   it("prunes log chunks and cost records past their retention window", async () => {

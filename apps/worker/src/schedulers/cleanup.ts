@@ -225,22 +225,39 @@ const MS_PER_DAY = 86_400_000;
 async function reconcileStuckPreviews(deps: CleanupWorkerDeps, now: Date): Promise<void> {
   const deadline = new Date(now.getTime() - deps.config.STUCK_DEPLOY_MINUTES * MS_PER_MINUTE);
 
-  // Stuck mid-deploy → FAIL (CAS via the legal source states) so a real failure
-  // is visible and the preview can be redeployed.
+  // Stuck mid-deploy → FAIL, but ONLY when the latest deployment has already
+  // reached a terminal state (the job finished/died but the preview row was
+  // never reconciled). If the latest deployment is still QUEUED/BUILDING/
+  // DEPLOYING the job is presumably still running (a legitimately slow build),
+  // so failing it here would clobber a deploy that is about to succeed.
   const stuckDeploying = await deps.prisma.preview.findMany({
     where: { status: { in: ["BUILDING", "DEPLOYING"] }, updatedAt: { lt: deadline } },
     select: { id: true },
   });
+  let failedStuck = 0;
   for (const p of stuckDeploying) {
-    await deps.prisma.preview.updateMany({
+    const latest = await deps.prisma.deployment.findFirst({
+      where: { previewId: p.id },
+      orderBy: { queuedAt: "desc" },
+      select: { status: true },
+    });
+    const latestTerminal =
+      latest != null &&
+      (["SUCCEEDED", "FAILED", "CANCELLED"] as const).includes(
+        latest.status as "SUCCEEDED" | "FAILED" | "CANCELLED",
+      );
+    if (!latestTerminal) continue; // job still in flight — leave it alone
+    const res = await deps.prisma.preview.updateMany({
       where: { id: p.id, status: { in: previewFromsFor("FAILED") } },
       data: { status: "FAILED" },
     });
-    // Reap any containers the stalled deploy left running.
+    if (res.count === 0) continue;
+    failedStuck += 1;
+    // Reap any containers the stalled deploy left running (keeps it redeployable).
     await deps.destroyQueue.add(
       QUEUE.destroy,
-      DestroyJobSchema.parse({ previewId: p.id, reason: "idle" }),
-      { ...DEFAULT_JOB_OPTIONS, deduplication: { id: destroyDedupId(p.id, "idle") } },
+      DestroyJobSchema.parse({ previewId: p.id, reason: "failed" }),
+      { ...DEFAULT_JOB_OPTIONS, deduplication: { id: destroyDedupId(p.id, "failed") } },
     );
   }
 
@@ -257,9 +274,9 @@ async function reconcileStuckPreviews(deps: CleanupWorkerDeps, now: Date): Promi
     );
   }
 
-  if (stuckDeploying.length + stuckDestroying.length > 0) {
+  if (failedStuck + stuckDestroying.length > 0) {
     deps.logger.warn(
-      { failedStuck: stuckDeploying.length, requeuedDestroy: stuckDestroying.length },
+      { failedStuck, requeuedDestroy: stuckDestroying.length },
       "cleanup tick: reconciled stranded previews",
     );
   }

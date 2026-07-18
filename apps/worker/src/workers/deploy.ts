@@ -620,7 +620,10 @@ async function failDeploy(
     teamId: input.teamId,
   });
   await notifyBuildFailed(db, deps.logger, input.previewId, summary);
-  await enqueueDestroy(deps, input.previewId, "idle");
+  // Reap any containers the failed deploy left running. "failed" reaps docker
+  // resources but keeps the preview FAILED (redeployable) — "idle" would be a
+  // no-op here (its eligibility gate only stops RUNNING/DEGRADED previews).
+  await enqueueDestroy(deps, input.previewId, "failed");
   const project = await loadProjectForStatus(db, input.projectId);
   if (project) {
     await postCommitStatus(deps, project, input.commitSha, "failure", undefined, summary);
@@ -636,7 +639,7 @@ async function failDeploy(
 async function enqueueDestroy(
   deps: DeployWorkerDeps,
   previewId: string,
-  reason: "idle" | "manual",
+  reason: "idle" | "manual" | "failed",
 ): Promise<void> {
   if (!deps.destroyQueue) return;
   try {

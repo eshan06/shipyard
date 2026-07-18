@@ -70,6 +70,11 @@ export const DestroyReasonSchema = z.enum([
   "manual",
   "ttl",
   "idle",
+  // Reap the docker resources of a preview whose deploy failed/stranded, WITHOUT
+  // marking it DESTROYED — the preview row keeps its (FAILED) status and stays
+  // redeployable. Distinct from "idle" (which stops a RUNNING preview to STOPPED)
+  // and the terminal reasons (which DESTROY it).
+  "failed",
 ]);
 /** Inferred type for {@link DestroyReasonSchema}. */
 export type DestroyReason = z.infer<typeof DestroyReasonSchema>;

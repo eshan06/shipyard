@@ -147,16 +147,19 @@ require consent under EU/UK law, but we still disclose them here for transparenc
 These remember choices you make to give you a better experience. They are **not** essential to the
 core service.
 
-- **Theme preference.** The dashboard remembers whether you chose light, dark, or system theme. This
-  preference is stored in your browser's **local storage** under the key
-  [[Theme storage key — confirm; the dashboard uses the `next-themes` library, whose default key is
-  `theme` unless overridden]]. It stays on your device, is not transmitted to our servers, and is used
-  only to render the interface in your chosen theme.
+- **Theme preference.** _(Not currently applicable — see the engineering note below.)_ If the
+  dashboard offers a selectable light/dark/system theme, that preference would be stored in your
+  browser's **local storage** under the key [[Theme storage key — confirm before publishing]]. It
+  would stay on your device, not be transmitted to our servers, and be used only to render the
+  interface in your chosen theme.
 
-> ⚠️ COUNSEL / ENGINEERING: Verify the actual `next-themes` storage key before publication. As
-> implemented, the theme provider sets no custom `storageKey`, so `next-themes` writes to its default
-> key `theme` in local storage; if a `storageKey` is later configured, update the disclosure and the
-> Section 7 table.
+> ⚠️ COUNSEL / ENGINEERING (updated 2026-07-17): The dashboard currently **forces a single dark theme**
+> (`next-themes` is mounted with `forcedTheme="dark"` and no user-facing theme control), so there is
+> **no user-selectable theme and no theme-preference value written to local storage**. As of this
+> revision the product writes **no functional client-side storage at all** — the only client storage
+> is the strictly-necessary auth cookies in Section 3. Before publishing, either delete this theme
+> bullet and its Section 7 row, or re-enable it only if a real theme selector ships (then confirm the
+> exact storage key).
 
 > ⚠️ COUNSEL / ENGINEERING: The bullets below describe functional storage that the product **may**
 > add but that is **not present in the current codebase** (as of this draft, the **only** client-side
@@ -176,12 +179,13 @@ core service.
   keys and that no preference includes personal data beyond a UI choice.
 
 > ⚠️ COUNSEL: In the EU/UK, functional storage that is not strictly necessary generally requires
-> consent before it is set. Because the theme preference is written **client-side as soon as the
-> dashboard loads**, counsel must decide whether (a) to treat it as a low-risk first-party preference
-> set only after the user is authenticated and has had notice, (b) to gate it behind the consent
-> banner, or (c) to rely on a national exemption. The same analysis applies to any future onboarding/
-> UI-preference storage. Note these are written to **local storage**, which is in scope for the EU/UK
-> consent rules just as cookies are.
+> consent before it is set. **As currently implemented the dashboard writes no non-essential
+> client-side storage** (theme is forced-dark; no onboarding/UI-preference storage ships), so only the
+> strictly-necessary auth cookies in Section 3 are set. Should any functional storage later ship (a
+> theme selector, an onboarding-dismissed flag, remembered UI preferences), counsel must decide
+> whether to (a) treat it as a low-risk first-party preference set only after authentication + notice,
+> (b) gate it behind a consent banner, or (c) rely on a national exemption — and note that local
+> storage is in scope for the EU/UK consent rules just as cookies are.
 
 ---
 
@@ -253,7 +257,7 @@ analytics, or a load balancer with sticky sessions).
 | `sy_session` | Shipyard (first-party) | Authentication — keeps you signed in (signed session JWT, subject = user account; `HttpOnly`, `SameSite=Lax`, `Secure` in prod) | Strictly necessary (cookie) | Persistent — [[Session cookie lifetime — current default 30 days]] |
 | `sy_oauth_state` | Shipyard (first-party) | Security / CSRF protection during GitHub OAuth sign-in (`HttpOnly`, `SameSite=Lax`, `Secure` in prod) | Strictly necessary (cookie) | Session / transient — deleted after sign-in completes |
 | `[[Load-balancer cookie name]]` | [[Load-balancer / hosting provider]] | Session affinity / routing to a consistent backend (only if sticky sessions are enabled) | Strictly necessary (cookie) | [[LB cookie expiry — often session]] |
-| [[Theme storage key — `next-themes` default `theme` unless overridden]] | Shipyard (first-party) | Remembers light/dark/system theme preference (stored in **local storage**, not transmitted) | Functional (local storage) | Persists until cleared by the user |
+| [[Theme storage key]] — **not currently written** (dashboard forces dark theme; no theme selector) | Shipyard (first-party) | Would remember a light/dark/system theme preference in **local storage** — only if a theme selector ships | Functional (local storage) | N/A while forced-dark |
 | `[[Onboarding flag key]]` | Shipyard (first-party) | Remembers that an onboarding checklist/tour was dismissed (stored in **local storage**) — **only if implemented; not present in the current codebase** | Functional (local storage) | Persists until cleared by the user |
 | `[[UI preference key(s)]]` | Shipyard (first-party) | Remembers low-sensitivity UI preferences (e.g. last selected team, view options) — **only if implemented; not present in the current codebase** | Functional (local storage) | Persists until cleared by the user |
 | `ph_[[project key]]_posthog` / `ph_*` | PostHog (first-party, **only if PostHog sink is configured**) | Product analytics — recognises sessions, de-duplicates telemetry events | Analytics / performance (cookie + local storage) | [[PostHog cookie expiry — confirm with provider]] |

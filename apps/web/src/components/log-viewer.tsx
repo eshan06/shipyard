@@ -101,12 +101,12 @@ export function LogViewer({
 
   return (
     <div className="overflow-hidden rounded-lg border">
-      <div className="flex items-center justify-between border-b bg-muted/40 px-4 py-2.5">
-        <div className="flex items-center gap-2.5">
-          <span className="text-sm font-medium">{title}</span>
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 border-b bg-muted/40 px-4 py-2.5">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <span className="truncate whitespace-nowrap text-sm font-medium">{title}</span>
           <ConnectionPill state={paused ? "closed" : state} />
         </div>
-        <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           <Button
             variant="ghost"
             size="sm"

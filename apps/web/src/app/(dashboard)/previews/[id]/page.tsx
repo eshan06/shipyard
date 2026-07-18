@@ -29,7 +29,6 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -345,9 +344,9 @@ export default function PreviewDetailPage(): React.JSX.Element {
         onRefresh={() => void mutate()}
       />
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        {/* Left: tabbed detail */}
-        <div className="xl:col-span-2">
+      <div className="space-y-6">
+        {/* Tabbed detail */}
+        <div>
           <Tabs defaultValue="services">
             <TabsList className="flex w-full flex-wrap justify-start">
               <TabsTrigger value="services">
@@ -534,14 +533,13 @@ export default function PreviewDetailPage(): React.JSX.Element {
           </Tabs>
         </div>
 
-        {/* Right: live logs */}
-        <div className="space-y-4">
+        {/* Live logs — full width below the tabs */}
+        <div className="space-y-2">
           <LogViewer
             deploymentId={latestDeploymentId}
             title="Latest deployment logs"
-            heightClass="h-[28rem]"
+            heightClass="h-80"
           />
-          <Separator />
           <p className="text-xs text-muted-foreground">
             Streaming the most recent deployment. Logs auto-scroll; scroll up to
             pause following.

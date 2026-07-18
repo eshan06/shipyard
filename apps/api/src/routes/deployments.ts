@@ -274,6 +274,9 @@ export const deploymentsRoutes: FastifyPluginAsyncZod = async (app) => {
         ...(status ? { status } : {}),
       };
 
+      // Project the build + a lightweight preview reference onto each row in the
+      // same query (the paginator supports `include`), so a page is a single
+      // round-trip instead of three sequential queries.
       const page = await paginate(app.prisma.deployment, {
         cursor,
         limit,
@@ -281,35 +284,17 @@ export const deploymentsRoutes: FastifyPluginAsyncZod = async (app) => {
         where,
         // Deployment has no `createdAt`; order by its queue time instead.
         orderBy: [{ queuedAt: order }, { id: order }],
+        include: {
+          build: true,
+          preview: { select: { id: true, slug: true, name: true } },
+        },
       });
-
-      // The cursor pagination helper does not project includes, so load the
-      // builds + a lightweight preview reference for this page in one query each
-      // and stitch them in.
-      const builds =
-        page.data.length === 0
-          ? []
-          : await app.prisma.build.findMany({
-              where: { deploymentId: { in: page.data.map((d) => d.id) } },
-            });
-      const buildByDeployment = new Map(builds.map((b) => [b.deploymentId, b]));
-
-      const previews =
-        page.data.length === 0
-          ? []
-          : await app.prisma.preview.findMany({
-              where: { id: { in: page.data.map((d) => d.previewId) } },
-              select: { id: true, slug: true, name: true },
-            });
-      const previewById = new Map(previews.map((p) => [p.id, p]));
 
       return {
         data: page.data.map((deployment) =>
-          toDeploymentDto({
-            ...deployment,
-            build: buildByDeployment.get(deployment.id) ?? null,
-            preview: previewById.get(deployment.previewId),
-          }),
+          toDeploymentDto(
+            deployment as Parameters<typeof toDeploymentDto>[0],
+          ),
         ),
         nextCursor: page.nextCursor,
       };

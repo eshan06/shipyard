@@ -154,6 +154,8 @@ model PullRequest {
 
   @@unique([projectId, number])
   @@index([projectId, state])
+  // Project-scoped, newest-first PR listings read in index order.
+  @@index([projectId, createdAt])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -200,6 +202,8 @@ model Preview {
 
   @@index([projectId, status])
   @@index([status])
+  // Project-scoped, newest-first preview listings read in index order.
+  @@index([projectId, createdAt])
 }
 
 enum DeploymentTrigger {
@@ -239,6 +243,11 @@ model Deployment {
 
   @@index([previewId, status])
   @@index([status])
+  // Latest-deployment lookup (per preview, newest first) — hit by the previews
+  // list, preview detail, the log SSE, and the worker reconciler.
+  @@index([previewId, queuedAt])
+  // Global newest-first deployments list pagination walks the index in order.
+  @@index([queuedAt])
 }
 
 enum BuildStatus {
@@ -456,6 +465,9 @@ model CostRecord {
   preview Preview @relation(fields: [previewId], references: [id], onDelete: Cascade)
 
   @@index([previewId, periodStart])
+  // Month-range scan for /costs/summary (across all previews) uses this instead
+  // of a full-table scan.
+  @@index([periodStart])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -542,4 +554,7 @@ model Notification {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, readAt])
+  // Default newest-first notification feed reads in index order (the readAt
+  // composite serves the unread filter, not this sort).
+  @@index([userId, createdAt])
 }

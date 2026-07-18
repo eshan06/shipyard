@@ -1,3 +1,5 @@
+import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
+
 import { Providers } from "@/components/providers";
 
 import type { Metadata, Viewport } from "next";
@@ -5,6 +7,24 @@ import type { Metadata, Viewport } from "next";
 
 import "./globals.css";
 import "./shipyard.css";
+
+/**
+ * Self-hosted fonts via `next/font` (bundled at build, no runtime Google CDN
+ * dependency / IP leak / CSP conflict). The CSS variables feed `--sans` /
+ * `--mono` in `shipyard.css`.
+ */
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-space-grotesk",
+  display: "swap",
+});
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-jetbrains-mono",
+  display: "swap",
+});
 
 /** Static document metadata for the dashboard. */
 export const metadata: Metadata = {
@@ -38,19 +58,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <html lang="en" className="dark" suppressHydrationWarning>
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link
-          rel="preconnect"
-          href="https://fonts.gstatic.com"
-          crossOrigin="anonymous"
-        />
-        <link
-          href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
-          rel="stylesheet"
-        />
-      </head>
+    <html
+      lang="en"
+      className={`dark ${spaceGrotesk.variable} ${jetbrainsMono.variable}`}
+      suppressHydrationWarning
+    >
       <body>
         <Providers>{children}</Providers>
       </body>

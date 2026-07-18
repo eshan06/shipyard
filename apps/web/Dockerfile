@@ -4,10 +4,17 @@
 # `next start`. Build context MUST be the repo root:
 #   docker build -f apps/web/Dockerfile -t shipyard-web .
 #
-# The dashboard talks to the API *same-origin* via a Next rewrite whose
-# destination is NEXT_PUBLIC_API_URL, read at RUNTIME in next.config.mjs. So the
-# API URL is configured by env at container start, NOT baked at build time —
-# point it at the in-cluster/service API (e.g. http://api:4000).
+# The dashboard talks to the API *same-origin* via a runtime Route Handler
+# (src/app/api/v1/[...path]/route.ts) that reads process.env.API_URL on every
+# request. So the API URL is configured by env at container START, NOT baked at
+# build time — point it at the in-cluster/service API (e.g. http://api:4000).
+#
+# The NEXT_PUBLIC_* build ARGs below are the exception: they are inlined into
+# the *client* bundle at `next build` and therefore MUST be supplied as
+# --build-arg (they cannot be changed at container start), e.g.:
+#   docker build -f apps/web/Dockerfile \
+#     --build-arg NEXT_PUBLIC_DEPLOY_DRIVER=docker \
+#     --build-arg NEXT_PUBLIC_API_URL=http://api:4000 -t shipyard-web .
 #
 # Stages: base → deps → build (next build → .next) → runtime (next start).
 # ──────────────────────────────────────────────────────────────────────────
@@ -35,6 +42,16 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
 # ── build: build @shipyard/core (consumed via transpilePackages) then web ───
 FROM deps AS build
 ENV NEXT_TELEMETRY_DISABLED=1
+# Client-bundle build-time config (inlined into .next at `next build`). These
+# are NEXT_PUBLIC_* so they reach the browser; they CANNOT be set at runtime.
+# The deploy driver defaults to `docker` so a plain build produces a real-preview
+# image (not the simulated /preview/[id] mock).
+ARG NEXT_PUBLIC_DEPLOY_DRIVER=docker
+ARG NEXT_PUBLIC_API_URL
+ARG NEXT_PUBLIC_ANALYTICS_ENABLED
+ENV NEXT_PUBLIC_DEPLOY_DRIVER=$NEXT_PUBLIC_DEPLOY_DRIVER \
+    NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL \
+    NEXT_PUBLIC_ANALYTICS_ENABLED=$NEXT_PUBLIC_ANALYTICS_ENABLED
 COPY tsconfig.base.json turbo.json ./
 COPY packages/core packages/core
 COPY apps/web apps/web
@@ -54,7 +71,7 @@ WORKDIR /app
 # config + manifests from disk at start).
 COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/package.json /app/pnpm-workspace.yaml ./
-# The Next.js config is read at runtime (rewrites destination, transpilePackages).
+# The Next.js config is read at runtime (transpilePackages, etc.).
 COPY --from=build --chown=node:node /app/apps/web/package.json   ./apps/web/package.json
 COPY --from=build --chown=node:node /app/apps/web/next.config.mjs ./apps/web/next.config.mjs
 COPY --from=build --chown=node:node /app/apps/web/.next          ./apps/web/.next

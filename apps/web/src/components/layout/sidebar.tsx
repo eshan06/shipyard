@@ -8,10 +8,16 @@ import * as React from "react";
 import { NAV_ITEMS, isNavActive } from "@/components/layout/nav";
 import { useDeployments, usePreviews } from "@/lib/hooks";
 
+import pkg from "../../../package.json";
+
+/** The build version, from package.json — a truthful, static footer indicator. */
+const APP_VERSION = pkg.version;
+
 /**
  * The redesigned ("engineering terminal") sidebar: brand mark + wordmark, a
- * WORKSPACE nav group with live counts for Previews/Builds, and a footer status
- * line. The active route gets the magenta soft background + indicator bar.
+ * WORKSPACE nav group with live counts for Previews/Builds, and a footer
+ * showing the (real) build version. The active route gets the magenta soft
+ * background + indicator bar.
  */
 export function Sidebar(): React.JSX.Element {
   const pathname = usePathname();
@@ -58,21 +64,7 @@ export function Sidebar(): React.JSX.Element {
       </nav>
 
       <div className="sidebar-foot">
-        <div className="sysline">
-          <span
-            className="bdot pulse-dot"
-            style={{
-              background: "var(--green)",
-              color: "var(--green)",
-              width: 7,
-              height: 7,
-              borderRadius: "50%",
-              display: "inline-block",
-            }}
-          />
-          All systems operational
-        </div>
-        <div className="sysline-sub">region · iad1 · v2.8.0</div>
+        <div className="sysline-sub">Shipyard · v{APP_VERSION}</div>
       </div>
     </aside>
   );

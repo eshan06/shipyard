@@ -118,13 +118,16 @@ function qs(params: Record<string, string | number | undefined>): string {
  */
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
+    ...init,
+    // Spread `init` first so a caller's `headers` can't clobber
+    // Content-Type/Accept and `credentials` can't be overridden: defaults are
+    // merged under the caller's headers, and credentials is always included.
     credentials: "include",
     headers: {
       "Content-Type": "application/json",
       Accept: "application/json",
       ...(init?.headers ?? {}),
     },
-    ...init,
   });
 
   if (res.status === 204) {

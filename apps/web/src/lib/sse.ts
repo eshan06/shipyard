@@ -11,11 +11,52 @@
  * @module
  */
 
-import { useEffect, useRef, useState } from "react";
+import { type MutableRefObject, useEffect, useRef, useState } from "react";
+import { mutate } from "swr";
 
-import { API_BASE } from "./api";
+import { api, API_BASE, ApiError } from "./api";
 
 import type { LogEvent, PreviewStatusEvent } from "./api-types";
+
+/** Min gap between auth probes so a broken stream can't hammer `/me`. */
+const AUTH_PROBE_THROTTLE_MS = 4000;
+
+/**
+ * Handle an `EventSource` error by distinguishing a *transient* connection
+ * problem (let it auto-reconnect) from an *expired session* (401). On a 401 we
+ * close the stream and revalidate `/me`, which makes the mounted `AuthGuard`
+ * redirect to `/login?next=...` instead of the stream retrying forever.
+ *
+ * Throttled + latched via the passed refs so a rapidly-firing `onerror` never
+ * spins up a tight probe loop.
+ *
+ * @param source - The erroring `EventSource` (closed on confirmed expiry).
+ * @param expiredRef - Latch: set once a 401 is confirmed (stops further probes).
+ * @param lastProbeRef - Timestamp of the last probe (throttle guard).
+ */
+function handleStreamError(
+  source: EventSource,
+  expiredRef: MutableRefObject<boolean>,
+  lastProbeRef: MutableRefObject<number>,
+): void {
+  if (expiredRef.current) return;
+  const now = Date.now();
+  if (now - lastProbeRef.current < AUTH_PROBE_THROTTLE_MS) return;
+  lastProbeRef.current = now;
+
+  // Probe an authenticated endpoint once. 200 → session fine, allow reconnect.
+  // 401 → session expired: stop and surface the auth path. Network/5xx → treat
+  // as transient and allow the normal `EventSource` reconnect.
+  void api.me().catch((err: unknown) => {
+    if (err instanceof ApiError && err.isUnauthorized) {
+      expiredRef.current = true;
+      source.close();
+      // Revalidate the `/me` cache so AuthGuard observes the 401 and redirects
+      // to /login (carrying ?next).
+      void mutate("/me");
+    }
+  });
+}
 
 /** Connection lifecycle state for an SSE stream. */
 export type StreamState = "connecting" | "open" | "closed" | "error";
@@ -52,6 +93,8 @@ export function useDeploymentLogs(
   const [logs, setLogs] = useState<LogEvent[]>([]);
   const [state, setState] = useState<StreamState>("connecting");
   const seqRef = useRef<Set<number>>(new Set());
+  const authExpiredRef = useRef(false);
+  const lastProbeRef = useRef(0);
 
   useEffect(() => {
     if (!deploymentId || !enabled) {
@@ -62,6 +105,8 @@ export function useDeploymentLogs(
     setState("connecting");
     seqRef.current = new Set();
     setLogs([]);
+    authExpiredRef.current = false;
+    lastProbeRef.current = 0;
 
     const url = `${API_BASE}/deployments/${deploymentId}/logs`;
     const source = new EventSource(url, { withCredentials: true });
@@ -86,8 +131,10 @@ export function useDeploymentLogs(
     };
 
     source.onerror = () => {
-      // EventSource auto-reconnects; surface the transient error state.
-      setState((prev) => (prev === "open" ? "error" : "error"));
+      // EventSource auto-reconnects; surface the transient error state and
+      // probe for an expired session (401) so we don't retry forever.
+      setState("error");
+      handleStreamError(source, authExpiredRef, lastProbeRef);
     };
 
     return () => {
@@ -131,6 +178,8 @@ export function usePreviewStatus(
   const enabled = options.enabled ?? true;
   const [event, setEvent] = useState<PreviewStatusEvent | null>(null);
   const [state, setState] = useState<StreamState>("connecting");
+  const authExpiredRef = useRef(false);
+  const lastProbeRef = useRef(0);
 
   useEffect(() => {
     if (!previewId || !enabled) {
@@ -139,6 +188,8 @@ export function usePreviewStatus(
     }
 
     setState("connecting");
+    authExpiredRef.current = false;
+    lastProbeRef.current = 0;
     const url = `${API_BASE}/previews/${previewId}/status`;
     const source = new EventSource(url, { withCredentials: true });
 
@@ -151,7 +202,11 @@ export function usePreviewStatus(
         // Ignore malformed/heartbeat lines.
       }
     };
-    source.onerror = () => setState("error");
+    source.onerror = () => {
+      // Surface the error and probe for an expired session (401).
+      setState("error");
+      handleStreamError(source, authExpiredRef, lastProbeRef);
+    };
 
     return () => {
       source.close();

@@ -1,10 +1,13 @@
 "use client";
 
-import { Bell, Check, ChevronsUpDown, Moon, Plus, Search } from "lucide-react";
-import { usePathname } from "next/navigation";
+import { Bell, LogOut, Search } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
 import * as React from "react";
+import { mutate } from "swr";
 
 import { useCommandPalette } from "@/components/command-palette";
+import { ANALYTICS_EVENTS, flushAnalytics, trackEvent } from "@/lib/analytics";
+import { api } from "@/lib/api";
 import { useMe, useNotifications } from "@/lib/hooks";
 import { initials } from "@/lib/utils";
 
@@ -38,28 +41,45 @@ function useOutside(
 }
 
 /**
- * The redesigned top bar: a terminal breadcrumb with a blinking caret, a ⌘K
- * search/command bar, a team switcher, a notifications panel, a (decorative)
- * theme toggle, and the user avatar.
+ * The top bar: a terminal breadcrumb with a blinking caret, a ⌘K search/command
+ * bar, a truthful active-team indicator, a notifications panel, and a user menu
+ * with a working "Sign out" action.
  */
 export function Topbar(): React.JSX.Element {
   const pathname = usePathname();
+  const router = useRouter();
   const cmd = useCommandPalette();
   const me = useMe();
   const notifs = useNotifications();
 
-  const [teamOpen, setTeamOpen] = React.useState(false);
   const [notifOpen, setNotifOpen] = React.useState(false);
-  const teamRef = React.useRef<HTMLDivElement>(null);
+  const [userOpen, setUserOpen] = React.useState(false);
   const notifRef = React.useRef<HTMLDivElement>(null);
-  useOutside(teamRef, () => setTeamOpen(false), teamOpen);
+  const userRef = React.useRef<HTMLDivElement>(null);
   useOutside(notifRef, () => setNotifOpen(false), notifOpen);
+  useOutside(userRef, () => setUserOpen(false), userOpen);
 
-  const teamName = me.data?.memberships[0]?.team?.name ?? "Acme";
-  const teamInitials = teamName.slice(0, 2).toUpperCase();
-  const userInitials = initials(me.data?.user.name ?? me.data?.user.email);
+  // Real active team from the current user's memberships (no fabricated data).
+  const team = me.data?.memberships[0]?.team;
+  const teamName = team?.name ?? null;
+  const teamInitials = teamName ? teamName.slice(0, 2).toUpperCase() : "";
+  const userName = me.data?.user.name ?? null;
+  const userEmail = me.data?.user.email ?? null;
+  const userInitials = initials(userName ?? userEmail);
   const items = notifs.data?.data ?? [];
   const hasUnread = items.some((n) => n.readAt === null);
+
+  const onSignOut = React.useCallback(async (): Promise<void> => {
+    setUserOpen(false);
+    // Record + flush the event *before* the session cookie is cleared (the
+    // telemetry route is auth-gated, so a buffered post-logout event would 401).
+    trackEvent(ANALYTICS_EVENTS.signedOut);
+    await flushAnalytics().catch(() => undefined);
+    await api.logout().catch(() => undefined);
+    // Clear the cached identity so no stale user leaks into the next session.
+    await mutate("/me", undefined, { revalidate: false });
+    router.replace("/login");
+  }, [router]);
 
   return (
     <header className="topbar">
@@ -77,36 +97,12 @@ export function Topbar(): React.JSX.Element {
           </span>
         </button>
 
-        <div
-          ref={teamRef}
-          style={{ position: "relative", display: "inline-flex" }}
-        >
-          <button className="teamswitch" onClick={() => setTeamOpen((o) => !o)}>
+        {teamName ? (
+          <div className="teamswitch static" title={teamName}>
             <span className="ts-avatar">{teamInitials}</span>
             <span className="ts-name">{teamName}</span>
-            <ChevronsUpDown size={14} />
-          </button>
-          {teamOpen ? (
-            <div
-              className="menu"
-              style={{ top: "calc(100% + 6px)", right: 0, minWidth: 210 }}
-            >
-              <div className="menu-label">Teams</div>
-              <div className="menu-item active">
-                <span className="ts-avatar" style={{ width: 20, height: 20 }}>
-                  {teamInitials}
-                </span>
-                <span>{teamName}</span>
-                <Check size={15} className="chk" />
-              </div>
-              <div className="menu-sep" />
-              <div className="menu-item">
-                <Plus size={15} />
-                <span>Create team</span>
-              </div>
-            </div>
-          ) : null}
-        </div>
+          </div>
+        ) : null}
 
         <div ref={notifRef} style={{ position: "relative" }}>
           <button className="iconbtn" onClick={() => setNotifOpen((o) => !o)}>
@@ -151,10 +147,57 @@ export function Topbar(): React.JSX.Element {
           ) : null}
         </div>
 
-        <button className="iconbtn" title="Theme">
-          <Moon size={16} />
-        </button>
-        <div className="avatar">{userInitials}</div>
+        <div ref={userRef} style={{ position: "relative" }}>
+          <button
+            className="avatar"
+            style={{ border: "none", padding: 0, font: "inherit" }}
+            onClick={() => setUserOpen((o) => !o)}
+            aria-label="User menu"
+            aria-haspopup="menu"
+            aria-expanded={userOpen}
+          >
+            {userInitials}
+          </button>
+          {userOpen ? (
+            <div
+              className="menu"
+              style={{ top: "calc(100% + 6px)", right: 0, minWidth: 220 }}
+            >
+              <div className="menu-label">Signed in</div>
+              <div className="menu-item" style={{ cursor: "default" }}>
+                <div style={{ minWidth: 0 }}>
+                  {userName ? (
+                    <div style={{ fontSize: 13, color: "var(--tx)" }}>
+                      {userName}
+                    </div>
+                  ) : null}
+                  {userEmail ? (
+                    <div
+                      className="mono"
+                      style={{
+                        fontSize: 11,
+                        color: "var(--tx-dim)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {userEmail}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
+              <div className="menu-sep" />
+              <div
+                className="menu-item danger"
+                role="menuitem"
+                onClick={() => void onSignOut()}
+              >
+                <LogOut size={15} />
+                <span>Sign out</span>
+              </div>
+            </div>
+          ) : null}
+        </div>
       </div>
     </header>
   );

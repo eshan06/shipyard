@@ -1,7 +1,7 @@
 "use client";
 
 import { Github, Loader2 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import * as React from "react";
 import { toast } from "sonner";
 
@@ -19,6 +19,16 @@ import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { ANALYTICS_EVENTS, trackEvent } from "@/lib/analytics";
 import { api, ApiError } from "@/lib/api";
+import { useMe } from "@/lib/hooks";
+
+/**
+ * Whether the dev-login (password-less) path is available. Mirrors the API's
+ * `DEV_AUTH` gate: in production `POST /auth/dev-login` is disabled, so the form
+ * would be broken AND would leak internal seeded emails — render it only in dev.
+ */
+const DEV_AUTH_ENABLED =
+  process.env.NEXT_PUBLIC_DEV_AUTH === "true" ||
+  process.env.NODE_ENV === "development";
 
 /** Seeded demo accounts shown as login hints (from `packages/db/prisma/seed.ts`). */
 const DEMO_ACCOUNTS: ReadonlyArray<{ email: string; role: string }> = [
@@ -28,15 +38,33 @@ const DEMO_ACCOUNTS: ReadonlyArray<{ email: string; role: string }> = [
   { email: "erin@acme.dev", role: "Viewer" },
 ];
 
+/** Resolve a safe in-app redirect target from the `?next=` param. */
+function safeNext(next: string | null): string {
+  // Only allow same-origin, absolute in-app paths (block `//evil.com` etc.).
+  if (next && next.startsWith("/") && !next.startsWith("//")) return next;
+  return "/";
+}
+
 /**
- * The login page: a centered card with a dev-login form (email → session) and a
- * "Sign in with GitHub" button. Seeded demo emails are listed as quick-fill
- * hints so the demo is usable out of the box.
+ * The login page: a centered card with a "Sign in with GitHub" button and — in
+ * dev only — a password-less dev-login form. Honours a `?next=` deep link and,
+ * if the visitor is already authenticated, bounces straight into the app.
  */
-export default function LoginPage(): React.JSX.Element {
+function LoginInner(): React.JSX.Element {
   const router = useRouter();
-  const [email, setEmail] = React.useState("alice@acme.dev");
+  const search = useSearchParams();
+  const next = safeNext(search.get("next"));
+  const me = useMe();
+
+  const [email, setEmail] = React.useState(
+    DEV_AUTH_ENABLED ? "alice@acme.dev" : "",
+  );
   const [submitting, setSubmitting] = React.useState(false);
+
+  // Already authenticated → skip the login page and honour `next`.
+  React.useEffect(() => {
+    if (me.data) router.replace(next);
+  }, [me.data, next, router]);
 
   const onSubmit = async (
     e: React.FormEvent<HTMLFormElement>,
@@ -48,7 +76,7 @@ export default function LoginPage(): React.JSX.Element {
       // Buffered now; flushed once the authenticated app mounts after redirect.
       trackEvent(ANALYTICS_EVENTS.signedIn, { method: "dev" });
       toast.success(`Welcome back, ${user.name ?? user.email}`);
-      router.push("/");
+      router.push(next);
     } catch (err) {
       const message =
         err instanceof ApiError
@@ -82,7 +110,9 @@ export default function LoginPage(): React.JSX.Element {
           <CardHeader>
             <CardTitle>Sign in</CardTitle>
             <CardDescription>
-              Continue with GitHub, or use a seeded dev account.
+              {DEV_AUTH_ENABLED
+                ? "Continue with GitHub, or use a seeded dev account."
+                : "Continue with GitHub to access your dashboard."}
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -93,55 +123,79 @@ export default function LoginPage(): React.JSX.Element {
               </a>
             </Button>
 
-            <div className="flex items-center gap-3">
-              <Separator className="flex-1" />
-              <span className="text-xs uppercase tracking-wide text-muted-foreground">
-                or dev login
-              </span>
-              <Separator className="flex-1" />
-            </div>
+            {DEV_AUTH_ENABLED ? (
+              <>
+                <div className="flex items-center gap-3">
+                  <Separator className="flex-1" />
+                  <span className="text-xs uppercase tracking-wide text-muted-foreground">
+                    or dev login
+                  </span>
+                  <Separator className="flex-1" />
+                </div>
 
-            <form onSubmit={onSubmit} className="space-y-3">
-              <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </div>
-              <Button type="submit" className="w-full" disabled={submitting}>
-                {submitting ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : null}
-                {submitting ? "Signing in…" : "Continue"}
-              </Button>
-            </form>
+                <form onSubmit={onSubmit} className="space-y-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="email">Email</Label>
+                    <Input
+                      id="email"
+                      type="email"
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={submitting}
+                  >
+                    {submitting ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : null}
+                    {submitting ? "Signing in…" : "Continue"}
+                  </Button>
+                </form>
+              </>
+            ) : null}
           </CardContent>
-          <CardFooter className="flex-col items-start gap-2">
-            <p className="text-xs font-medium text-muted-foreground">
-              Demo accounts
-            </p>
-            <div className="flex flex-wrap gap-1.5">
-              {DEMO_ACCOUNTS.map((acct) => (
-                <button
-                  key={acct.email}
-                  type="button"
-                  onClick={() => setEmail(acct.email)}
-                  className="rounded-md border border-border bg-secondary/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
-                >
-                  {acct.email}{" "}
-                  <span className="text-muted-foreground/70">· {acct.role}</span>
-                </button>
-              ))}
-            </div>
-          </CardFooter>
+          {DEV_AUTH_ENABLED ? (
+            <CardFooter className="flex-col items-start gap-2">
+              <p className="text-xs font-medium text-muted-foreground">
+                Demo accounts
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {DEMO_ACCOUNTS.map((acct) => (
+                  <button
+                    key={acct.email}
+                    type="button"
+                    onClick={() => setEmail(acct.email)}
+                    className="rounded-md border border-border bg-secondary/50 px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+                  >
+                    {acct.email}{" "}
+                    <span className="text-muted-foreground/70">
+                      · {acct.role}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </CardFooter>
+          ) : null}
         </Card>
       </div>
     </main>
+  );
+}
+
+/**
+ * Login page wrapper. `useSearchParams` requires a Suspense boundary to keep the
+ * route from opting the whole page into forced dynamic rendering at build.
+ */
+export default function LoginPage(): React.JSX.Element {
+  return (
+    <React.Suspense fallback={null}>
+      <LoginInner />
+    </React.Suspense>
   );
 }

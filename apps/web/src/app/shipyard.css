@@ -43,8 +43,10 @@
   --radius-sm: 6px;
   --radius-lg: 14px;
 
-  --sans: "Space Grotesk", "Segoe UI", system-ui, sans-serif;
-  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  /* Self-hosted via next/font (`--font-*`), with the family name + system stack
+     as graceful fallbacks if the variable isn't applied. */
+  --sans: var(--font-space-grotesk, "Space Grotesk"), "Segoe UI", system-ui, sans-serif;
+  --mono: var(--font-jetbrains-mono, "JetBrains Mono"), ui-monospace, "SF Mono", Menlo, monospace;
 
   --shadow: 0 1px 2px rgba(0,0,0,0.4), 0 8px 28px -12px rgba(0,0,0,0.55);
   --shadow-lg: 0 24px 60px -20px rgba(0,0,0,0.7);
@@ -188,6 +190,9 @@ body {
 .teamswitch .ts-avatar { width: 20px; height: 20px; border-radius: 6px; display: grid; place-items: center; font-family: var(--mono); font-size: 9.5px; font-weight: 600; background: linear-gradient(150deg,#3a3f4d,#22252e); color: var(--tx); flex: none; }
 .teamswitch .ts-name { font-size: 13px; font-weight: 500; }
 .teamswitch svg { width: 14px; height: 14px; color: var(--tx-dim); }
+/* Static (non-interactive) active-team indicator — honest, not a dead control. */
+.teamswitch.static { cursor: default; }
+.teamswitch.static:hover { border-color: var(--line); background: var(--panel); }
 
 .avatar {
   width: 34px; height: 34px; border-radius: 9px; flex: none;
@@ -565,4 +570,41 @@ body {
   .cols-4 { grid-template-columns: repeat(2,1fr); }
   .pv-grid { grid-template-columns: repeat(2,1fr); }
   .two-col { grid-template-columns: 1fr; }
+}
+
+/* ---------- phones: collapse the sidebar so it doesn't eat the screen ---------- */
+@media (max-width: 768px) {
+  /* Single content column; the sidebar becomes a slim top strip (row 1). */
+  .app { grid-template-columns: 1fr; grid-template-rows: auto 1fr; }
+
+  .sidebar {
+    flex-direction: row; align-items: center;
+    border-right: none; border-bottom: 1px solid var(--line);
+    overflow-x: auto; min-height: 0;
+  }
+  .brand { border-bottom: none; padding: 10px 14px; flex: none; }
+  .nav { flex-direction: row; align-items: center; padding: 8px; gap: 4px; overflow-x: auto; overflow-y: hidden; }
+  .nav-label { display: none; }
+  .nav-item { flex: none; padding: 8px 12px; }
+  .nav-item .nav-count { margin-left: 6px; }
+  .nav-item.active::before { display: none; }
+  .sidebar-foot { display: none; }
+
+  .topbar { padding: 0 14px; gap: 10px; }
+  /* The ⌘K search + team indicator crowd a phone header — hide the non-essential
+     affordances, keeping notifications + the user menu reachable. */
+  .kbar, .teamswitch.static { display: none; }
+
+  .page { padding: 20px 16px 60px; }
+  .phead { flex-direction: column; gap: 14px; }
+  .phead-r { margin-left: 0; }
+
+  /* Stack all multi-column grids into one column. */
+  .cols-4, .cols-3, .cols-2 { grid-template-columns: 1fr; }
+  .pv-grid { grid-template-columns: 1fr; }
+  .two-col { grid-template-columns: 1fr; }
+
+  /* Wide tables scroll horizontally instead of overflowing the viewport. */
+  .tablewrap { overflow-x: auto; }
+  .dtable { min-width: 640px; }
 }

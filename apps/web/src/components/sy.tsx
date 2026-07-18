@@ -35,7 +35,11 @@ export function Sparkline({
   w?: number;
   h?: number;
   fill?: boolean;
-}): React.JSX.Element {
+}): React.JSX.Element | null {
+  // Guard empty/degenerate input: `Math.max(...[])` is `-Infinity`, which would
+  // poison every coordinate. A single point can't form a line either.
+  const id = React.useId().replace(/:/g, "");
+  if (!data || data.length < 2) return null;
   const max = Math.max(...data);
   const min = Math.min(...data);
   const rng = max - min || 1;
@@ -47,7 +51,6 @@ export function Sparkline({
     .map((p, i) => `${i ? "L" : "M"}${p[0].toFixed(1)} ${p[1].toFixed(1)}`)
     .join(" ");
   const area = `${line} L${w} ${h} L0 ${h} Z`;
-  const id = React.useId().replace(/:/g, "");
   return (
     <svg
       className="stat-spark"

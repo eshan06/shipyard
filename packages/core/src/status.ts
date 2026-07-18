@@ -167,6 +167,37 @@ export function canTransitionDeployment(
 }
 
 /**
+ * Every {@link PreviewStatus} from which a transition to `to` is legal
+ * (including `to` itself, since a same-state write is idempotent). Use this to
+ * turn a status write into an atomic compare-and-swap:
+ * `updateMany({ where: { id, status: { in: previewFromsFor(to) } }, data: { status: to } })`
+ * — a `count` of 0 means the row moved underneath you (lost the race).
+ *
+ * @param to - The desired target status.
+ * @returns The set of source statuses that may legally reach `to`.
+ */
+export function previewFromsFor(to: PreviewStatus): PreviewStatus[] {
+  const froms = (Object.keys(PREVIEW_TRANSITIONS) as PreviewStatus[]).filter((from) =>
+    PREVIEW_TRANSITIONS[from].includes(to),
+  );
+  return [to, ...froms];
+}
+
+/**
+ * Every {@link DeploymentStatus} from which a transition to `to` is legal
+ * (including `to`). The deployment analogue of {@link previewFromsFor}.
+ *
+ * @param to - The desired target status.
+ * @returns The set of source statuses that may legally reach `to`.
+ */
+export function deploymentFromsFor(to: DeploymentStatus): DeploymentStatus[] {
+  const froms = (Object.keys(DEPLOYMENT_TRANSITIONS) as DeploymentStatus[]).filter((from) =>
+    DEPLOYMENT_TRANSITIONS[from].includes(to),
+  );
+  return [to, ...froms];
+}
+
+/**
  * Whether a {@link PreviewStatus} is terminal (no further transitions).
  *
  * @param status - The status to check.

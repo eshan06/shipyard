@@ -13,9 +13,11 @@ import {
   PREVIEW_TRANSITIONS,
   canTransitionDeployment,
   canTransitionPreview,
+  deploymentFromsFor,
   deploymentStatusDisplay,
   isDeploymentTerminal,
   isPreviewTerminal,
+  previewFromsFor,
   previewStatusDisplay,
 } from "./status.js";
 
@@ -115,5 +117,38 @@ describe("status — deployment", () => {
       color: "danger",
       isActive: false,
     });
+  });
+});
+
+describe("previewFromsFor / deploymentFromsFor (CAS source states)", () => {
+  it("returns every legal source state (plus the target itself) for a preview target", () => {
+    // DEPLOYING and QUEUED/STOPPED/FAILED can reach RUNNING? Only DEPLOYING/DEGRADED
+    // legally reach RUNNING; the helper must include those and RUNNING itself,
+    // and must NOT include a terminal DESTROYED.
+    const froms = previewFromsFor("RUNNING");
+    expect(froms).toContain("RUNNING"); // idempotent same-state write
+    expect(froms).toContain("DEPLOYING");
+    expect(froms).toContain("DEGRADED");
+    expect(froms).not.toContain("DESTROYED");
+    // Consistency with the transition table: every returned `from` (except the
+    // target itself) can legally transition to the target.
+    for (const from of froms) {
+      if (from === "RUNNING") continue;
+      expect(canTransitionPreview(from, "RUNNING")).toBe(true);
+    }
+  });
+
+  it("cannot resurrect a DESTROYED preview: DESTROYED is never a legal source", () => {
+    for (const to of ["RUNNING", "BUILDING", "DEPLOYING", "STOPPED"] as const) {
+      expect(previewFromsFor(to)).not.toContain("DESTROYED");
+    }
+  });
+
+  it("returns the legal source states for a deployment target", () => {
+    const froms = deploymentFromsFor("SUCCEEDED");
+    expect(froms).toContain("SUCCEEDED");
+    expect(froms).toContain("DEPLOYING");
+    expect(froms).not.toContain("FAILED");
+    expect(froms).not.toContain("CANCELLED");
   });
 });

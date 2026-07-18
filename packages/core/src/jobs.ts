@@ -89,6 +89,20 @@ export const DestroyJobSchema = z.object({
 export type DestroyJob = z.infer<typeof DestroyJobSchema>;
 
 /**
+ * Stable deduplication key for a destroy of `(previewId, reason)`, shared by the
+ * API's manual/webhook enqueue and the cleanup scheduler so they agree.
+ *
+ * Passed to BullMQ's `deduplication: { id }` option (NOT a bare `jobId`): a
+ * deduplication key is released when the job leaves the queue, whereas a
+ * retained completed/failed job with the same `jobId` would silently swallow
+ * every later re-enqueue for the whole `removeOnComplete`/`removeOnFail` window.
+ * Contains no `:` (BullMQ's internal key separator).
+ */
+export function destroyDedupId(previewId: string, reason: DestroyReason): string {
+  return `destroy-${previewId}-${reason}`;
+}
+
+/**
  * Payload for the repeatable `cleanup` job. Carries no data — the worker scans
  * the database for idle/expired previews each tick.
  */

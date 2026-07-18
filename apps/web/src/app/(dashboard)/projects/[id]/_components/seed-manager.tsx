@@ -5,11 +5,8 @@ import * as React from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 
-
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { EmptyState, ErrorState } from "@/components/states";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Select, Toggle } from "@/components/sy";
 import {
   Dialog,
   DialogContent,
@@ -18,21 +15,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import { api, ApiError } from "@/lib/api";
 
 import type { ListResponse, SeedTemplate } from "@/lib/api-types";
 import type { SeedKind } from "@shipyard/core";
+
+/** Minimal dark-terminal input styling (no shared `.input` class exists). */
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  background: "var(--bg-elev, #0e1015)",
+  border: "1px solid var(--line)",
+  borderRadius: 7,
+  color: "var(--tx)",
+  fontFamily: "var(--mono)",
+  fontSize: 13,
+  padding: "8px 10px",
+  outline: "none",
+};
 
 /** Selectable seed kinds with friendly labels and source hints. */
 const KINDS: ReadonlyArray<{
@@ -154,39 +153,38 @@ function SeedDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="seed-name">Name</Label>
-            <Input
+        <div style={{ display: "grid", gap: 16 }}>
+          <div style={{ display: "grid", gap: 6 }}>
+            <label htmlFor="seed-name" style={{ fontSize: 12, color: "var(--tx-dim)" }}>
+              Name
+            </label>
+            <input
               id="seed-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="Demo data"
               autoComplete="off"
+              style={inputStyle}
             />
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="seed-kind">Kind</Label>
-            <Select value={kind} onValueChange={(v) => setKind(v as SeedKind)}>
-              <SelectTrigger id="seed-kind">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {KINDS.map((k) => (
-                  <SelectItem key={k.value} value={k.value}>
-                    {k.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">{kindMeta?.hint}</p>
+          <div style={{ display: "grid", gap: 6 }}>
+            <label style={{ fontSize: 12, color: "var(--tx-dim)" }}>Kind</label>
+            <Select
+              value={kind}
+              options={KINDS.map((k) => ({ value: k.value, label: k.label }))}
+              onChange={(v) => setKind(v as SeedKind)}
+              width={220}
+            />
+            <p className="psub" style={{ fontSize: 11.5 }}>
+              {kindMeta?.hint}
+            </p>
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="seed-source">
+          <div style={{ display: "grid", gap: 6 }}>
+            <label htmlFor="seed-source" style={{ fontSize: 12, color: "var(--tx-dim)" }}>
               {isSql ? "SQL" : "Source"}
-            </Label>
+            </label>
             <textarea
               id="seed-source"
               value={source}
@@ -194,44 +192,58 @@ function SeedDialog({
               placeholder={kindMeta?.placeholder}
               spellCheck={false}
               rows={isSql ? 6 : 2}
-              className="flex w-full rounded-md border border-input bg-transparent px-3 py-2 font-mono text-xs shadow-sm transition-colors placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50"
+              style={{ ...inputStyle, resize: "vertical", lineHeight: 1.5 }}
             />
           </div>
 
-          <div className="flex items-start justify-between gap-4 rounded-md border p-3">
-            <div className="space-y-0.5">
-              <Label
-                htmlFor="seed-default"
-                className="flex items-center gap-1.5"
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: 16,
+              border: "1px solid var(--line)",
+              borderRadius: 8,
+              padding: 12,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
               >
-                <Star className="size-3.5" />
+                <Star size={13} />
                 Default template
-              </Label>
-              <p className="text-xs text-muted-foreground">
+              </div>
+              <p className="psub" style={{ marginTop: 3, fontSize: 11.5 }}>
                 Used automatically for new previews. Setting this unsets any
                 other default.
               </p>
             </div>
-            <Switch
-              id="seed-default"
-              checked={isDefault}
-              onCheckedChange={setIsDefault}
-              aria-label="Mark as default"
-            />
+            <Toggle on={isDefault} onChange={setIsDefault} />
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
+          <button
+            className="btn btn-ghost btn-sm"
             onClick={() => onOpenChange(false)}
             disabled={busy}
           >
             Cancel
-          </Button>
-          <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => void handleSubmit()}
+            disabled={!canSubmit}
+          >
             {isEdit ? "Save changes" : "Add template"}
-          </Button>
+          </button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -297,97 +309,138 @@ export function SeedManager({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <h3 className="text-base font-semibold">Seed templates</h3>
-          <p className="text-sm text-muted-foreground">
+    <div style={{ display: "grid", gap: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600 }}>Seed templates</h3>
+          <p className="psub" style={{ marginTop: 4 }}>
             Define how fresh preview databases are populated.
           </p>
         </div>
-        <Button size="sm" onClick={openAdd}>
-          <Plus className="size-4" />
+        <button className="btn btn-primary btn-sm" onClick={openAdd}>
+          <Plus size={13} />
           Add template
-        </Button>
+        </button>
       </div>
 
       {seeds.isLoading ? (
-        <div className="space-y-2">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <Skeleton key={i} className="h-16 w-full rounded-md" />
-          ))}
-        </div>
+        <div className="empty">Loading templates…</div>
       ) : seeds.error ? (
-        <ErrorState
-          description={seeds.error.message}
-          onRetry={() => void seeds.mutate()}
-        />
+        <div className="empty">
+          <div style={{ marginBottom: 10 }}>{seeds.error.message}</div>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => void seeds.mutate()}
+          >
+            Retry
+          </button>
+        </div>
       ) : items.length === 0 ? (
-        <EmptyState
-          icon={Database}
-          title="No seed templates"
-          description="Add a template to automatically seed data into new preview databases."
-          action={
-            <Button size="sm" onClick={openAdd}>
-              <Plus className="size-4" />
+        <div className="empty">
+          <Database
+            size={20}
+            style={{ display: "block", margin: "0 auto 10px", opacity: 0.6 }}
+          />
+          No seed templates yet — add a template to automatically seed data into
+          new preview databases.
+          <div style={{ marginTop: 14 }}>
+            <button className="btn btn-primary btn-sm" onClick={openAdd}>
+              <Plus size={13} />
               Add template
-            </Button>
-          }
-        />
+            </button>
+          </div>
+        </div>
       ) : (
-        <div className="space-y-2">
+        <div style={{ display: "grid", gap: 10 }}>
           {items.map((s) => (
             <div
               key={s.id}
-              className="flex items-start justify-between gap-3 rounded-md border p-4"
+              className="card"
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                justifyContent: "space-between",
+                gap: 12,
+                padding: 16,
+              }}
             >
-              <div className="min-w-0 space-y-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="truncate text-sm font-medium">{s.name}</span>
-                  <Badge variant="outline" className="text-[10px] uppercase">
+              <div style={{ minWidth: 0, display: "grid", gap: 6 }}>
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <span
+                    className="truncate"
+                    style={{ fontSize: 13, fontWeight: 600 }}
+                  >
+                    {s.name}
+                  </span>
+                  <span className="pill" style={{ textTransform: "uppercase" }}>
                     {s.kind}
-                  </Badge>
+                  </span>
                   {s.isDefault ? (
-                    <Badge variant="info" className="gap-1 text-[10px]">
-                      <Star className="size-3" />
+                    <span className="badge b-blue">
+                      <Star size={11} />
                       Default
-                    </Badge>
+                    </span>
                   ) : null}
                 </div>
-                <p className="truncate font-mono text-xs text-muted-foreground">
+                <p
+                  className="c-mono truncate"
+                  style={{
+                    color: "var(--tx-dim)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
                   {s.source}
                 </p>
               </div>
-              <div className="flex shrink-0 items-center gap-1">
+              <div
+                style={{
+                  display: "flex",
+                  flex: "none",
+                  alignItems: "center",
+                  gap: 6,
+                }}
+              >
                 {!s.isDefault ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
+                  <button
+                    className="btn btn-ghost btn-sm"
                     disabled={defaultingId === s.id}
                     onClick={() => void makeDefault(s)}
                   >
-                    <Star className="size-4" />
+                    <Star size={13} />
                     Make default
-                  </Button>
+                  </button>
                 ) : null}
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-8"
+                <button
+                  className="copybtn"
                   onClick={() => openEdit(s)}
                   aria-label={`Edit ${s.name}`}
                 >
-                  <Pencil className="size-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 text-muted-foreground hover:text-destructive"
+                  <Pencil size={13} />
+                </button>
+                <button
+                  className="copybtn"
                   onClick={() => setDeleting(s)}
                   aria-label={`Delete ${s.name}`}
                 >
-                  <Trash2 className="size-4" />
-                </Button>
+                  <Trash2 size={13} />
+                </button>
               </div>
             </div>
           ))}

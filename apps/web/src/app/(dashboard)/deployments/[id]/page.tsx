@@ -17,27 +17,14 @@ import { toast } from "sonner";
 
 import { ConfirmDialog } from "@/components/confirm-dialog";
 import { LogViewer } from "@/components/log-viewer";
-import { ErrorState } from "@/components/states";
-import { StatusBadge } from "@/components/status-badge";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+import { StatusBadge, type StatusTone } from "@/components/status-badge";
+import { Term } from "@/components/sy";
 import { api, ApiError } from "@/lib/api";
 import { useDeployment } from "@/lib/hooks";
 import { absoluteTime, relativeTime } from "@/lib/time";
-import { cn, formatDuration, shortSha } from "@/lib/utils";
+import { formatDuration, shortSha } from "@/lib/utils";
 
+import type { TermLine } from "@/components/sy";
 import type { Build, Deployment } from "@/lib/api-types";
 import type { BuildStatus } from "@shipyard/core";
 
@@ -45,18 +32,23 @@ import type { BuildStatus } from "@shipyard/core";
 const CANCELLABLE = new Set(["QUEUED", "BUILDING", "DEPLOYING"]);
 
 /** Local display metadata for {@link BuildStatus} (core ships no build map). */
-const BUILD_STATUS_KIND: Record<
-  BuildStatus,
-  { label: string; variant: React.ComponentProps<typeof Badge>["variant"] }
-> = {
-  PENDING: { label: "Pending", variant: "muted" },
-  RUNNING: { label: "Running", variant: "info" },
-  SUCCEEDED: { label: "Succeeded", variant: "success" },
-  FAILED: { label: "Failed", variant: "destructive" },
-  CANCELLED: { label: "Cancelled", variant: "muted" },
+const BUILD_STATUS_KIND: Record<BuildStatus, { label: string; tone: StatusTone }> = {
+  PENDING: { label: "Pending", tone: "gray" },
+  RUNNING: { label: "Running", tone: "blue" },
+  SUCCEEDED: { label: "Succeeded", tone: "green" },
+  FAILED: { label: "Failed", tone: "red" },
+  CANCELLED: { label: "Cancelled", tone: "gray" },
 };
 
-/** A labelled key/value row. */
+/** Split a raw error summary into red-tinted terminal log lines. */
+function errorTermLines(summary: string): TermLine[] {
+  return summary
+    .trim()
+    .split("\n")
+    .map((text) => ({ text: text.length > 0 ? text : " ", tone: "red" as const }));
+}
+
+/** A labelled key/value row (terminal `.kv`). */
 function MetaRow({
   icon,
   label,
@@ -67,12 +59,15 @@ function MetaRow({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-4 py-2.5">
-      <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+    <div className="kv">
+      <span
+        className="kv-k"
+        style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+      >
         {icon}
         {label}
       </span>
-      <span className="min-w-0 truncate text-right text-sm font-medium">
+      <span className="kv-v" style={{ minWidth: 0 }}>
         {children}
       </span>
     </div>
@@ -85,61 +80,60 @@ function BuildStatusBadge({
 }: {
   status: BuildStatus;
 }): React.JSX.Element {
-  const meta = BUILD_STATUS_KIND[status] ?? {
-    label: status,
-    variant: "muted" as const,
-  };
-  return <Badge variant={meta.variant}>{meta.label}</Badge>;
+  const meta = BUILD_STATUS_KIND[status] ?? { label: status, tone: "gray" as const };
+  return <span className={`badge b-${meta.tone}`}>{meta.label}</span>;
 }
 
 /** The build summary card: status, image tag, cache, exit code, error. */
 function BuildCard({ build }: { build: Build }): React.JSX.Element {
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Hammer className="size-4 text-muted-foreground" />
+    <div className="panel">
+      <div className="panel-head">
+        <span className="panel-title">
+          <Hammer size={16} />
           Build
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="divide-y">
+        </span>
+      </div>
+      <div style={{ padding: "4px 18px 14px" }}>
         <MetaRow icon={<span aria-hidden>·</span>} label="Status">
           <BuildStatusBadge status={build.status} />
         </MetaRow>
-        <MetaRow icon={<Package className="size-4" />} label="Image">
+        <MetaRow icon={<Package size={14} />} label="Image">
           {build.imageTag ? (
-            <span className="font-mono text-xs">{build.imageTag}</span>
+            <span className="mono" style={{ fontSize: 12 }}>
+              {build.imageTag}
+            </span>
           ) : (
-            <span className="text-muted-foreground">—</span>
+            <span style={{ color: "var(--tx-dim)" }}>—</span>
           )}
         </MetaRow>
-        <MetaRow icon={<Zap className="size-4" />} label="Cache">
+        <MetaRow icon={<Zap size={14} />} label="Cache">
           {build.cacheHit ? (
-            <Badge variant="success">Hit</Badge>
+            <span className="badge b-green">Hit</span>
           ) : (
-            <span className="text-muted-foreground">Miss</span>
+            <span style={{ color: "var(--tx-dim)" }}>Miss</span>
           )}
         </MetaRow>
-        <MetaRow icon={<Clock className="size-4" />} label="Duration">
+        <MetaRow icon={<Clock size={14} />} label="Duration">
           {formatDuration(build.durationMs)}
         </MetaRow>
         {build.exitCode != null ? (
           <MetaRow icon={<span aria-hidden>·</span>} label="Exit code">
-            <span className="font-mono">{build.exitCode}</span>
+            <span className="mono">{build.exitCode}</span>
           </MetaRow>
         ) : null}
         {build.errorSummary ? (
-          <div className="pt-3">
-            <p className="mb-1.5 text-xs font-medium text-destructive">
-              Error summary
-            </p>
-            <pre className="max-h-48 overflow-auto whitespace-pre-wrap break-words rounded-md bg-destructive/5 p-3 font-mono text-xs leading-relaxed text-destructive">
-              {build.errorSummary.trim()}
-            </pre>
+          <div style={{ paddingTop: 14 }}>
+            <Term
+              title="build · error summary"
+              tag="FAILED"
+              tagTone="red"
+              lines={errorTermLines(build.errorSummary)}
+            />
           </div>
         ) : null}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -156,55 +150,60 @@ function DeploymentDetailHeader({
   const canCancel = CANCELLABLE.has(deployment.status);
 
   return (
-    <div className="space-y-4">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="-ml-2 text-muted-foreground"
+    <div style={{ marginBottom: 22 }}>
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{ marginBottom: 16 }}
         onClick={() => router.push("/deployments")}
       >
-        <ArrowLeft className="size-4" />
+        <ArrowLeft size={14} />
         Deployments
-      </Button>
+      </button>
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-2xl font-semibold tracking-tight">
-              {previewName ?? "Deployment"}
-            </h2>
+      <div className="phead" style={{ marginBottom: 0 }}>
+        <div className="phead-l">
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h1 className="ptitle">{previewName ?? "Deployment"}</h1>
             <StatusBadge status={deployment.status} kind="deployment" />
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <GitCommit className="size-3.5" />
-              <span className="font-mono">{shortSha(deployment.commitSha)}</span>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 16,
+              marginTop: 10,
+            }}
+          >
+            <span className="meta">
+              <GitCommit />
+              <span className="mono">{shortSha(deployment.commitSha)}</span>
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Zap className="size-3.5" />
+            <span className="meta">
+              <Zap />
               {deployment.trigger}
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <Clock className="size-3.5" />
+            <span className="meta">
+              <Clock />
               {relativeTime(deployment.queuedAt)}
             </span>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="phead-r">
           {deployment.preview ? (
-            <Button asChild variant="outline">
-              <Link href={`/previews/${deployment.previewId}`}>
-                <Boxes className="size-4" />
-                Preview
-              </Link>
-            </Button>
+            <Link
+              className="btn btn-outline"
+              href={`/previews/${deployment.previewId}`}
+            >
+              <Boxes size={15} />
+              Preview
+            </Link>
           ) : null}
           {canCancel ? (
-            <Button variant="destructive" onClick={onCancel}>
-              <CircleSlash className="size-4" />
+            <button className="btn btn-danger" onClick={onCancel}>
+              <CircleSlash size={15} />
               Cancel
-            </Button>
+            </button>
           ) : null}
         </div>
       </div>
@@ -227,23 +226,23 @@ export default function DeploymentDetailPage(): React.JSX.Element {
 
   if (error) {
     return (
-      <ErrorState
-        title="Couldn't load deployment"
-        description={error.message}
-        onRetry={() => void mutate()}
-      />
+      <div className="page fade-in">
+        <div className="empty">
+          <div style={{ marginBottom: 10 }}>
+            Couldn&apos;t load deployment — {error.message}
+          </div>
+          <button className="btn btn-outline btn-sm" onClick={() => void mutate()}>
+            Try again
+          </button>
+        </div>
+      </div>
     );
   }
 
   if (isLoading || !deployment) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-32" />
-        <Skeleton className="h-10 w-72" />
-        <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
-          <Skeleton className="h-72 w-full" />
-          <Skeleton className="h-96 w-full" />
-        </div>
+      <div className="page fade-in">
+        <div className="empty">Loading deployment…</div>
       </div>
     );
   }
@@ -259,74 +258,61 @@ export default function DeploymentDetailPage(): React.JSX.Element {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="page fade-in">
       <DeploymentDetailHeader
         deployment={deployment}
         onCancel={() => setConfirmCancel(true)}
       />
 
-      <div className="grid gap-6 lg:grid-cols-[20rem_1fr]">
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle>Details</CardTitle>
-            </CardHeader>
-            <CardContent className="divide-y">
-              <MetaRow icon={<GitCommit className="size-4" />} label="Commit">
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span className="font-mono text-xs">
-                      {shortSha(deployment.commitSha)}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent className="font-mono text-xs">
-                    {deployment.commitSha}
-                  </TooltipContent>
-                </Tooltip>
+      <div className="two-col" style={{ alignItems: "start" }}>
+        <div style={{ display: "grid", gap: 18 }}>
+          <div className="panel">
+            <div className="panel-head">
+              <span className="panel-title">Details</span>
+            </div>
+            <div style={{ padding: "4px 18px 14px" }}>
+              <MetaRow icon={<GitCommit size={14} />} label="Commit">
+                <span
+                  className="mono"
+                  style={{ fontSize: 12 }}
+                  title={deployment.commitSha}
+                >
+                  {shortSha(deployment.commitSha)}
+                </span>
               </MetaRow>
-              <MetaRow icon={<Zap className="size-4" />} label="Trigger">
+              <MetaRow icon={<Zap size={14} />} label="Trigger">
                 {deployment.trigger}
               </MetaRow>
-              <MetaRow icon={<Clock className="size-4" />} label="Duration">
+              <MetaRow icon={<Clock size={14} />} label="Duration">
                 {formatDuration(deployment.durationMs)}
               </MetaRow>
               <MetaRow icon={<span aria-hidden>·</span>} label="Queued">
-                <span className="text-muted-foreground">
+                <span style={{ color: "var(--tx-dim)" }}>
                   {absoluteTime(deployment.queuedAt)}
                 </span>
               </MetaRow>
               <MetaRow icon={<span aria-hidden>·</span>} label="Started">
-                <span className="text-muted-foreground">
+                <span style={{ color: "var(--tx-dim)" }}>
                   {absoluteTime(deployment.startedAt)}
                 </span>
               </MetaRow>
               <MetaRow icon={<span aria-hidden>·</span>} label="Finished">
-                <span className="text-muted-foreground">
+                <span style={{ color: "var(--tx-dim)" }}>
                   {absoluteTime(deployment.finishedAt)}
                 </span>
               </MetaRow>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
 
           {deployment.build ? <BuildCard build={deployment.build} /> : null}
 
           {deployment.errorSummary ? (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-destructive">Error</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <pre
-                  className={cn(
-                    "max-h-48 overflow-auto whitespace-pre-wrap break-words",
-                    "rounded-md bg-destructive/5 p-3 font-mono text-xs",
-                    "leading-relaxed text-destructive",
-                  )}
-                >
-                  {deployment.errorSummary.trim()}
-                </pre>
-              </CardContent>
-            </Card>
+            <Term
+              title={`error · ${shortSha(deployment.commitSha)}`}
+              tag="FAILED"
+              tagTone="red"
+              lines={errorTermLines(deployment.errorSummary)}
+            />
           ) : null}
         </div>
 

@@ -13,11 +13,8 @@ import * as React from "react";
 import { toast } from "sonner";
 import useSWR from "swr";
 
-
 import { ConfirmDialog } from "@/components/confirm-dialog";
-import { EmptyState, ErrorState } from "@/components/states";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Select, Toggle } from "@/components/sy";
 import {
   Dialog,
   DialogContent,
@@ -26,35 +23,23 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { api, ApiError } from "@/lib/api";
 
 import type { EnvVar, ListResponse } from "@/lib/api-types";
 import type { EnvTarget } from "@shipyard/core";
+
+/** Minimal dark-terminal input styling (no shared `.input` class exists). */
+const inputStyle: React.CSSProperties = {
+  width: "100%",
+  background: "var(--bg-elev, #0e1015)",
+  border: "1px solid var(--line)",
+  borderRadius: 7,
+  color: "var(--tx)",
+  fontFamily: "var(--mono)",
+  fontSize: 13,
+  padding: "8px 10px",
+  outline: "none",
+};
 
 /** Selectable env targets with friendly labels. */
 const TARGETS: ReadonlyArray<{ value: EnvTarget; label: string; hint: string }> =
@@ -182,10 +167,12 @@ function EnvVarDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
-          <div className="space-y-1.5">
-            <Label htmlFor="env-key">Key</Label>
-            <Input
+        <div style={{ display: "grid", gap: 16 }}>
+          <div style={{ display: "grid", gap: 6 }}>
+            <label htmlFor="env-key" style={{ fontSize: 12, color: "var(--tx-dim)" }}>
+              Key
+            </label>
+            <input
               id="env-key"
               value={key}
               onChange={(e) => setKey(e.target.value)}
@@ -193,32 +180,36 @@ function EnvVarDialog({
               disabled={isEdit}
               autoComplete="off"
               spellCheck={false}
-              className="font-mono"
               aria-invalid={keyError ? true : undefined}
               aria-describedby={keyError ? "env-key-error" : undefined}
+              style={{
+                ...inputStyle,
+                borderColor: keyError ? "var(--red-line)" : "var(--line)",
+                opacity: isEdit ? 0.6 : 1,
+              }}
             />
             {keyError ? (
-              <p id="env-key-error" className="text-xs text-destructive">
+              <p id="env-key-error" style={{ fontSize: 11.5, color: "#ff8c82" }}>
                 {keyError}
               </p>
             ) : isEdit ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="psub" style={{ fontSize: 11.5 }}>
                 The key is fixed once created.
               </p>
             ) : null}
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="env-value">
+          <div style={{ display: "grid", gap: 6 }}>
+            <label htmlFor="env-value" style={{ fontSize: 12, color: "var(--tx-dim)" }}>
               Value{" "}
               {isEdit ? (
-                <span className="font-normal text-muted-foreground">
+                <span style={{ color: "var(--tx-faint)" }}>
                   (optional — blank keeps current)
                 </span>
               ) : null}
-            </Label>
-            <div className="relative">
-              <Input
+            </label>
+            <div style={{ position: "relative" }}>
+              <input
                 id="env-value"
                 type={isSecret && !showValue ? "password" : "text"}
                 value={value}
@@ -230,86 +221,97 @@ function EnvVarDialog({
                 }
                 autoComplete="off"
                 spellCheck={false}
-                className="pr-9 font-mono"
+                style={{ ...inputStyle, paddingRight: 34 }}
               />
               <button
                 type="button"
                 onClick={() => setShowValue((s) => !s)}
-                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm"
                 aria-label={showValue ? "Hide value" : "Show value"}
+                style={{
+                  position: "absolute",
+                  right: 8,
+                  top: "50%",
+                  transform: "translateY(-50%)",
+                  display: "grid",
+                  placeItems: "center",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  color: "var(--tx-dim)",
+                  padding: 0,
+                }}
               >
-                {showValue ? (
-                  <EyeOff className="size-4" />
-                ) : (
-                  <Eye className="size-4" />
-                )}
+                {showValue ? <EyeOff size={15} /> : <Eye size={15} />}
               </button>
             </div>
             {isEdit && existing?.isSecret && value.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="psub" style={{ fontSize: 11.5 }}>
                 The current secret cannot be displayed. Type a new value to
                 rotate it.
               </p>
             ) : null}
           </div>
 
-          <div className="space-y-1.5">
-            <Label htmlFor="env-target">Target</Label>
+          <div style={{ display: "grid", gap: 6 }}>
+            <label style={{ fontSize: 12, color: "var(--tx-dim)" }}>Target</label>
             <Select
               value={target}
-              onValueChange={(v) => setTarget(v as EnvTarget)}
-            >
-              <SelectTrigger id="env-target">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TARGETS.map((t) => (
-                  <SelectItem key={t.value} value={t.value}>
-                    <span className="flex flex-col">
-                      <span>{t.label}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
+              options={TARGETS.map((t) => ({ value: t.value, label: t.label }))}
+              onChange={(v) => setTarget(v as EnvTarget)}
+              width={220}
+            />
+            <p className="psub" style={{ fontSize: 11.5 }}>
               {TARGETS.find((t) => t.value === target)?.hint}
             </p>
           </div>
 
-          <div className="flex items-start justify-between gap-4 rounded-md border p-3">
-            <div className="space-y-0.5">
-              <Label
-                htmlFor="env-secret"
-                className="flex items-center gap-1.5"
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              justifyContent: "space-between",
+              gap: 16,
+              border: "1px solid var(--line)",
+              borderRadius: 8,
+              padding: 12,
+            }}
+          >
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 6,
+                }}
               >
-                <Lock className="size-3.5" />
+                <Lock size={13} />
                 Secret
-              </Label>
-              <p className="text-xs text-muted-foreground">
+              </div>
+              <p className="psub" style={{ marginTop: 3, fontSize: 11.5 }}>
                 Encrypted at rest and never shown again after saving.
               </p>
             </div>
-            <Switch
-              id="env-secret"
-              checked={isSecret}
-              onCheckedChange={setIsSecret}
-              aria-label="Mark as secret"
-            />
+            <Toggle on={isSecret} onChange={setIsSecret} />
           </div>
         </div>
 
         <DialogFooter>
-          <Button
-            variant="outline"
+          <button
+            className="btn btn-ghost btn-sm"
             onClick={() => onOpenChange(false)}
             disabled={busy}
           >
             Cancel
-          </Button>
-          <Button onClick={() => void handleSubmit()} disabled={!canSubmit}>
+          </button>
+          <button
+            className="btn btn-primary btn-sm"
+            onClick={() => void handleSubmit()}
+            disabled={!canSubmit}
+          >
             {isEdit ? "Save changes" : "Add variable"}
-          </Button>
+          </button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -327,84 +329,75 @@ function EnvVarRow({
   onDelete: (v: EnvVar) => void;
 }): React.JSX.Element {
   return (
-    <TableRow>
-      <TableCell className="font-mono text-xs font-medium">
-        <span className="flex items-center gap-1.5">
+    <tr style={{ cursor: "default" }}>
+      <td>
+        <span
+          className="c-mono"
+          style={{ display: "flex", alignItems: "center", gap: 7, fontWeight: 500 }}
+        >
           {v.isSecret ? (
-            <Lock className="size-3.5 shrink-0 text-warning" />
+            <Lock size={13} style={{ color: "var(--amber)", flex: "none" }} />
           ) : (
-            <KeyRound className="size-3.5 shrink-0 text-muted-foreground" />
+            <KeyRound size={13} style={{ color: "var(--tx-dim)", flex: "none" }} />
           )}
           {v.key}
         </span>
-      </TableCell>
-      <TableCell className="max-w-[16rem]">
+      </td>
+      <td style={{ maxWidth: "16rem" }}>
         {v.isSecret ? (
-          <TooltipProvider>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <span
-                  className="select-none font-mono text-xs text-muted-foreground"
-                  aria-label="Hidden secret value"
-                >
-                  {SECRET_MASK}
-                </span>
-              </TooltipTrigger>
-              <TooltipContent>
-                Secret values are encrypted and can never be revealed.
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
+          <span
+            className="c-mono"
+            title="Secret values are encrypted and can never be revealed."
+            aria-label="Hidden secret value"
+            style={{ color: "var(--tx-dim)", userSelect: "none" }}
+          >
+            {SECRET_MASK}
+          </span>
         ) : (
-          <span className="block truncate font-mono text-xs text-muted-foreground">
+          <span
+            className="c-mono truncate"
+            style={{ color: "var(--tx-dim)", display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+          >
             {v.value && v.value.length > 0 ? (
               v.value
             ) : (
-              <span className="italic opacity-60">empty</span>
+              <span style={{ fontStyle: "italic", opacity: 0.6 }}>empty</span>
             )}
           </span>
         )}
-      </TableCell>
-      <TableCell>
-        <Badge variant="outline" className="text-[10px]">
-          {v.target}
-        </Badge>
-      </TableCell>
-      <TableCell>
+      </td>
+      <td>
+        <span className="pill">{v.target}</span>
+      </td>
+      <td>
         {v.isSecret ? (
-          <Badge variant="warning" className="gap-1 text-[10px]">
-            <Lock className="size-3" />
+          <span className="badge b-amber">
+            <Lock size={11} />
             Secret
-          </Badge>
+          </span>
         ) : (
-          <Badge variant="muted" className="text-[10px]">
-            Plain
-          </Badge>
+          <span className="badge b-gray">Plain</span>
         )}
-      </TableCell>
-      <TableCell className="text-right">
-        <div className="flex items-center justify-end gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
+      </td>
+      <td style={{ textAlign: "right" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: 6 }}>
+          <button
+            className="copybtn"
             onClick={() => onEdit(v)}
             aria-label={`Edit ${v.key}`}
           >
-            <Pencil className="size-4" />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 text-muted-foreground hover:text-destructive"
+            <Pencil size={13} />
+          </button>
+          <button
+            className="copybtn"
             onClick={() => onDelete(v)}
             aria-label={`Delete ${v.key}`}
           >
-            <Trash2 className="size-4" />
-          </Button>
+            <Trash2 size={13} />
+          </button>
         </div>
-      </TableCell>
-    </TableRow>
+      </td>
+    </tr>
   );
 }
 
@@ -454,11 +447,19 @@ export function EnvManager({
   };
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-1">
-          <h3 className="text-base font-semibold">Environment variables</h3>
-          <p className="text-sm text-muted-foreground">
+    <div style={{ display: "grid", gap: 14 }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "flex-start",
+          justifyContent: "space-between",
+          gap: 16,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ minWidth: 0 }}>
+          <h3 style={{ fontSize: 15, fontWeight: 600 }}>Environment variables</h3>
+          <p className="psub" style={{ marginTop: 4 }}>
             Project-scoped variables injected into every preview.
             {items.length > 0
               ? ` ${items.length} total${
@@ -467,48 +468,52 @@ export function EnvManager({
               : ""}
           </p>
         </div>
-        <Button size="sm" onClick={openAdd}>
-          <Plus className="size-4" />
+        <button className="btn btn-primary btn-sm" onClick={openAdd}>
+          <Plus size={13} />
           Add variable
-        </Button>
+        </button>
       </div>
 
       {env.isLoading ? (
-        <div className="space-y-2 rounded-md border p-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-9 w-full" />
-          ))}
-        </div>
+        <div className="empty">Loading variables…</div>
       ) : env.error ? (
-        <ErrorState
-          description={env.error.message}
-          onRetry={() => void env.mutate()}
-        />
+        <div className="empty">
+          <div style={{ marginBottom: 10 }}>{env.error.message}</div>
+          <button
+            className="btn btn-outline btn-sm"
+            onClick={() => void env.mutate()}
+          >
+            Retry
+          </button>
+        </div>
       ) : items.length === 0 ? (
-        <EmptyState
-          icon={KeyRound}
-          title="No environment variables"
-          description="Add variables and secrets here to make them available to every preview in this project."
-          action={
-            <Button size="sm" onClick={openAdd}>
-              <Plus className="size-4" />
+        <div className="empty">
+          <KeyRound
+            size={20}
+            style={{ display: "block", margin: "0 auto 10px", opacity: 0.6 }}
+          />
+          No environment variables yet — add variables and secrets here to make
+          them available to every preview in this project.
+          <div style={{ marginTop: 14 }}>
+            <button className="btn btn-primary btn-sm" onClick={openAdd}>
+              <Plus size={13} />
               Add variable
-            </Button>
-          }
-        />
+            </button>
+          </div>
+        </div>
       ) : (
-        <div className="overflow-hidden rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Key</TableHead>
-                <TableHead>Value</TableHead>
-                <TableHead>Target</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+        <div className="tablewrap">
+          <table className="dtable">
+            <thead>
+              <tr>
+                <th>Key</th>
+                <th>Value</th>
+                <th>Target</th>
+                <th>Type</th>
+                <th style={{ textAlign: "right" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
               {items.map((v) => (
                 <EnvVarRow
                   key={v.id}
@@ -517,8 +522,8 @@ export function EnvManager({
                   onDelete={setDeleting}
                 />
               ))}
-            </TableBody>
-          </Table>
+            </tbody>
+          </table>
         </div>
       )}
 

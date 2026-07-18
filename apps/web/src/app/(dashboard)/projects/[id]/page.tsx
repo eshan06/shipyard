@@ -14,25 +14,6 @@ import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import * as React from "react";
 
-
-
-import { ErrorState } from "@/components/states";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger,
-} from "@/components/ui/tabs";
 import { usePreviews, useProject } from "@/lib/hooks";
 import { absoluteTime } from "@/lib/time";
 
@@ -45,7 +26,15 @@ import {
 
 import type { Project } from "@/lib/api-types";
 
-/** A labelled key/value pair in the overview repository card. */
+/** The project detail tabs. */
+const TABS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "overview", label: "Overview" },
+  { value: "env", label: "Environment" },
+  { value: "seeds", label: "Seed templates" },
+  { value: "settings", label: "Settings" },
+];
+
+/** A labelled key/value pair (terminal `.kv`) in the overview repository card. */
 function InfoRow({
   icon,
   label,
@@ -56,12 +45,15 @@ function InfoRow({
   children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <div className="flex items-center justify-between gap-4 py-2.5">
-      <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+    <div className="kv">
+      <span
+        className="kv-k"
+        style={{ display: "inline-flex", alignItems: "center", gap: 8 }}
+      >
         {icon}
         {label}
       </span>
-      <span className="min-w-0 truncate text-right text-sm font-medium">
+      <span className="kv-v" style={{ minWidth: 0 }}>
         {children}
       </span>
     </div>
@@ -81,64 +73,71 @@ function ProjectDetailHeader({
       : null;
 
   return (
-    <div className="space-y-4">
-      <Button
-        variant="ghost"
-        size="sm"
-        className="-ml-2 text-muted-foreground"
+    <div style={{ marginBottom: 22 }}>
+      <button
+        className="btn btn-ghost btn-sm"
+        style={{ marginBottom: 16 }}
         onClick={() => router.push("/projects")}
       >
-        <ArrowLeft className="size-4" />
+        <ArrowLeft size={14} />
         Projects
-      </Button>
+      </button>
 
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <div className="space-y-2">
-          <div className="flex items-center gap-2.5">
-            <h2 className="text-2xl font-semibold tracking-tight">
-              {project.name}
-            </h2>
+      <div className="phead" style={{ marginBottom: 0 }}>
+        <div className="phead-l">
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <h1 className="ptitle">{project.name}</h1>
             {project.isArchived ? (
-              <Badge variant="muted" className="gap-1">
-                <Archive className="size-3" />
+              <span className="badge b-gray">
+                <Archive size={11} />
                 Archived
-              </Badge>
+              </span>
             ) : null}
           </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <Github className="size-3.5" />
-              <span className="font-mono">{project.repoFullName}</span>
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: 16,
+              marginTop: 10,
+            }}
+          >
+            <span className="meta">
+              <Github />
+              <span className="mono">{project.repoFullName}</span>
             </span>
-            <span className="inline-flex items-center gap-1.5">
-              <GitBranch className="size-3.5" />
-              <span className="font-mono">{project.defaultBranch}</span>
+            <span className="meta">
+              <GitBranch />
+              <span className="mono">{project.defaultBranch}</span>
             </span>
             {project.framework ? (
-              <span className="inline-flex items-center gap-1.5">
-                <Layers className="size-3.5" />
-                <span className="capitalize">{project.framework}</span>
+              <span className="meta">
+                <Layers />
+                <span style={{ textTransform: "capitalize" }}>
+                  {project.framework}
+                </span>
               </span>
             ) : null}
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="phead-r">
           {repoUrl ? (
-            <Button asChild variant="outline">
-              <a href={repoUrl} target="_blank" rel="noopener noreferrer">
-                <Github className="size-4" />
-                Repository
-                <ExternalLink className="size-3.5" />
-              </a>
-            </Button>
+            <a
+              className="btn btn-outline"
+              href={repoUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <Github size={15} />
+              Repository
+              <ExternalLink size={13} />
+            </a>
           ) : null}
-          <Button asChild variant="outline">
-            <Link href={`/previews?projectId=${project.id}`}>
-              <Boxes className="size-4" />
-              Previews
-            </Link>
-          </Button>
+          <Link className="btn btn-outline" href={`/previews?projectId=${project.id}`}>
+            <Boxes size={15} />
+            Previews
+          </Link>
         </div>
       </div>
     </div>
@@ -157,48 +156,52 @@ function OverviewTab({
   const previewCount = previews.data?.data.length;
 
   return (
-    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-      <Card>
-        <CardHeader>
-          <CardTitle>Repository</CardTitle>
-          <CardDescription>
+    <div className="grid cols-2" style={{ alignItems: "start", gap: 18 }}>
+      <div className="panel">
+        <div className="panel-head">
+          <span className="panel-title">Repository</span>
+        </div>
+        <div style={{ padding: "4px 18px 14px" }}>
+          <p className="psub" style={{ marginTop: 8, marginBottom: 4 }}>
             Source-control connection and build location.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="divide-y">
-          <InfoRow icon={<Github className="size-4" />} label="Repository">
-            <span className="font-mono">{project.repoFullName}</span>
+          </p>
+          <InfoRow icon={<Github size={14} />} label="Repository">
+            <span className="mono">{project.repoFullName}</span>
           </InfoRow>
           <InfoRow icon={<span aria-hidden>·</span>} label="Provider">
-            <span className="capitalize">{project.provider}</span>
+            <span style={{ textTransform: "capitalize" }}>
+              {project.provider}
+            </span>
           </InfoRow>
-          <InfoRow icon={<GitBranch className="size-4" />} label="Default branch">
-            <span className="font-mono">{project.defaultBranch}</span>
+          <InfoRow icon={<GitBranch size={14} />} label="Default branch">
+            <span className="mono">{project.defaultBranch}</span>
           </InfoRow>
-          <InfoRow icon={<Layers className="size-4" />} label="Framework">
+          <InfoRow icon={<Layers size={14} />} label="Framework">
             {project.framework ? (
-              <span className="capitalize">{project.framework}</span>
+              <span style={{ textTransform: "capitalize" }}>
+                {project.framework}
+              </span>
             ) : (
-              <span className="text-muted-foreground">Auto-detect</span>
+              <span style={{ color: "var(--tx-dim)" }}>Auto-detect</span>
             )}
           </InfoRow>
-          <InfoRow icon={<FolderRoot className="size-4" />} label="Root directory">
-            <span className="font-mono">{project.rootDirectory || "/"}</span>
+          <InfoRow icon={<FolderRoot size={14} />} label="Root directory">
+            <span className="mono">{project.rootDirectory || "/"}</span>
           </InfoRow>
-          <InfoRow icon={<Boxes className="size-4" />} label="Active previews">
+          <InfoRow icon={<Boxes size={14} />} label="Active previews">
             {previews.isLoading ? (
-              <Skeleton className="ml-auto h-4 w-8" />
+              <span style={{ color: "var(--tx-dim)" }}>…</span>
             ) : (
               <span>{previewCount ?? 0}</span>
             )}
           </InfoRow>
           <InfoRow icon={<span aria-hidden>·</span>} label="Created">
-            <span className="text-muted-foreground">
+            <span style={{ color: "var(--tx-dim)" }}>
               {absoluteTime(project.createdAt)}
             </span>
           </InfoRow>
-        </CardContent>
-      </Card>
+        </div>
+      </div>
 
       <DeploySettingsCard project={project} onSaved={onSaved} />
     </div>
@@ -215,26 +218,29 @@ function OverviewTab({
 export default function ProjectDetailPage(): React.JSX.Element {
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const [tab, setTab] = React.useState("overview");
 
   const { data: project, error, isLoading, mutate } = useProject(id);
 
   if (error) {
     return (
-      <ErrorState
-        title="Couldn't load project"
-        description={error.message}
-        onRetry={() => void mutate()}
-      />
+      <div className="page fade-in">
+        <div className="empty">
+          <div style={{ marginBottom: 10 }}>
+            Couldn&apos;t load project — {error.message}
+          </div>
+          <button className="btn btn-outline btn-sm" onClick={() => void mutate()}>
+            Try again
+          </button>
+        </div>
+      </div>
     );
   }
 
   if (isLoading || !project) {
     return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-24" />
-        <Skeleton className="h-10 w-72" />
-        <Skeleton className="h-9 w-96" />
-        <Skeleton className="h-64 w-full" />
+      <div className="page fade-in">
+        <div className="empty">Loading project…</div>
       </div>
     );
   }
@@ -244,34 +250,59 @@ export default function ProjectDetailPage(): React.JSX.Element {
   };
 
   return (
-    <div className="space-y-8">
+    <div className="page fade-in">
       <ProjectDetailHeader project={project} />
 
-      <Tabs defaultValue="overview">
-        <TabsList className="flex w-full flex-wrap justify-start">
-          <TabsTrigger value="overview">Overview</TabsTrigger>
-          <TabsTrigger value="env">Environment</TabsTrigger>
-          <TabsTrigger value="seeds">Seed templates</TabsTrigger>
-          <TabsTrigger value="settings">Settings</TabsTrigger>
-        </TabsList>
+      <div
+        style={{
+          display: "flex",
+          gap: 2,
+          borderBottom: "1px solid var(--line)",
+          marginBottom: 22,
+          flexWrap: "wrap",
+        }}
+      >
+        {TABS.map((t) => {
+          const active = tab === t.value;
+          return (
+            <button
+              key={t.value}
+              className="mono"
+              onClick={() => setTab(t.value)}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                padding: "10px 14px",
+                fontSize: 12.5,
+                color: active ? "var(--tx)" : "var(--tx-dim)",
+                borderBottom: active
+                  ? "2px solid var(--acc)"
+                  : "2px solid transparent",
+                marginBottom: -1,
+                transition: "color .14s",
+              }}
+            >
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
 
-        <TabsContent value="overview" className="mt-6">
-          <OverviewTab project={project} onSaved={refresh} />
-        </TabsContent>
+      {tab === "overview" ? (
+        <OverviewTab project={project} onSaved={refresh} />
+      ) : null}
 
-        <TabsContent value="env" className="mt-6">
-          <EnvManager projectId={project.id} />
-        </TabsContent>
+      {tab === "env" ? <EnvManager projectId={project.id} /> : null}
 
-        <TabsContent value="seeds" className="mt-6">
-          <SeedManager projectId={project.id} />
-        </TabsContent>
+      {tab === "seeds" ? <SeedManager projectId={project.id} /> : null}
 
-        <TabsContent value="settings" className="mt-6 space-y-6">
+      {tab === "settings" ? (
+        <div style={{ display: "grid", gap: 18 }}>
           <DeploySettingsCard project={project} onSaved={refresh} />
           <DangerZoneCard project={project} onChanged={refresh} />
-        </TabsContent>
-      </Tabs>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -10,7 +10,7 @@
  * so they work even across process restarts.
  */
 
-import { DockerDriver, type BuildLogEvent } from "./docker.js";
+import { DockerDriver, type BuildLogEvent, type RegistryAuth } from "./docker.js";
 import { ContainerStartError, DaemonUnavailableError } from "./errors.js";
 import { topologicalOrder } from "./graph.js";
 import { emitLog, emitProgress, emitServiceStatus } from "./hooks.js";
@@ -39,6 +39,14 @@ export interface DockerOrchestratorOptions {
    * omitted, URLs fall back to `http://127.0.0.1:<hostPort>`.
    */
   baseDomain?: string;
+  /**
+   * Name of the shared edge/proxy Docker network. When set, the preview's
+   * ingress service is attached to it and stamped with reverse-proxy routing
+   * labels so `<slug>.<baseDomain>` resolves to it. See `infra/docker/preview-proxy.yml`.
+   */
+  edgeNetworkName?: string;
+  /** Registry credentials for private image pulls/builds (forwarded to the driver). */
+  registryAuth?: RegistryAuth[];
 }
 
 /** Map a dockerode container state string onto a {@link ServiceState}. */
@@ -78,10 +86,13 @@ export function aggregatePreviewState(states: ServiceState[]): PreviewState {
 export class DockerOrchestrator implements PreviewOrchestrator {
   private readonly driver: DockerDriver;
   private readonly baseDomain?: string;
+  private readonly edgeNetworkName?: string;
 
   constructor(options: DockerOrchestratorOptions = {}) {
-    this.driver = options.driver ?? new DockerDriver();
+    this.driver =
+      options.driver ?? new DockerDriver({ registryAuth: options.registryAuth });
     this.baseDomain = options.baseDomain;
+    this.edgeNetworkName = options.edgeNetworkName;
   }
 
   /** @inheritdoc */
@@ -103,10 +114,14 @@ export class DockerOrchestrator implements PreviewOrchestrator {
     const networkId = await this.driver.ensureNetwork(plan.networkName, plan.labels);
 
     const runtimes = new Map<string, ServiceRuntime>();
+    // Bounds every follow-mode log stream started during this deploy: aborted in
+    // the finally below so healthy previews don't leak an open daemon stream per
+    // service (and the worker stops ingesting runtime logs once the deploy ends).
+    const logAbort = new AbortController();
 
     try {
       for (const service of order) {
-        const runtime = await this.deployService(plan, service, hooks, networkId);
+        const runtime = await this.deployService(plan, service, hooks, logAbort.signal);
         runtimes.set(service.name, runtime);
       }
     } catch (error) {
@@ -128,6 +143,8 @@ export class DockerOrchestrator implements PreviewOrchestrator {
       // want it (worker persists partial state then re-throws to retry).
       (error as DeployEngineError & { partialResult?: DeployResult }).partialResult = result;
       throw error;
+    } finally {
+      logAbort.abort();
     }
 
     const ordered = order.map((s) => runtimes.get(s.name)!);
@@ -152,7 +169,7 @@ export class DockerOrchestrator implements PreviewOrchestrator {
     plan: PreviewPlan,
     service: ServicePlan,
     hooks: OrchestratorHooks | undefined,
-    _networkId: string,
+    logSignal: AbortSignal,
   ): Promise<ServiceRuntime> {
     const runtime: ServiceRuntime = {
       name: service.name,
@@ -166,14 +183,24 @@ export class DockerOrchestrator implements PreviewOrchestrator {
     const image = await this.resolveImage(plan, service, hooks);
     runtime.image = image;
 
+    // Wire the ingress service to the shared edge/proxy network + routing labels.
+    const isIngress = service.ingress && this.edgeNetworkName != null && this.baseDomain != null;
+    const containerLabels = isIngress
+      ? { ...plan.labels, ...this.proxyLabels(plan, service) }
+      : plan.labels;
+    const extraNetworks = isIngress
+      ? [{ name: this.edgeNetworkName!, aliases: [`${plan.slug}`] }]
+      : undefined;
+
     emitProgress(hooks, { phase: "creating", service: service.name, message: `Creating ${service.name}` });
     const containerId = await this.driver.createAndStart({
       service,
       image,
       networkName: plan.networkName,
       networkAlias: service.name,
-      labels: plan.labels,
+      labels: containerLabels,
       slug: plan.slug,
+      ...(extraNetworks ? { extraNetworks } : {}),
     });
     runtime.containerId = containerId;
     runtime.status = "starting";
@@ -183,9 +210,11 @@ export class DockerOrchestrator implements PreviewOrchestrator {
     // Discover the daemon-assigned published ports.
     runtime.publishedPorts = await this.resolvePublishedPorts(containerId);
 
-    // Begin streaming logs (fire-and-forget; bounded by container lifetime).
+    // Begin streaming logs; bounded by the deploy-scoped abort signal so the
+    // stream is torn down when the deploy resolves (not held for the container's
+    // multi-day lifetime).
     if (hooks?.onLog) {
-      void this.pumpLogs(containerId, service.name, hooks);
+      void this.pumpLogs(containerId, service.name, hooks, logSignal);
     }
 
     emitProgress(hooks, { phase: "health", service: service.name, message: `Waiting for ${service.name}` });
@@ -262,19 +291,40 @@ export class DockerOrchestrator implements PreviewOrchestrator {
     return out;
   }
 
-  /** Drain a container's log stream into the `onLog` hook until it ends. */
+  /** Drain a container's log stream into the `onLog` hook until the deploy ends. */
   private async pumpLogs(
     containerId: string,
     serviceName: string,
     hooks: OrchestratorHooks,
+    signal: AbortSignal,
   ): Promise<void> {
     try {
-      for await (const line of this.driver.streamLogs(containerId, serviceName, { follow: true })) {
+      for await (const line of this.driver.streamLogs(containerId, serviceName, {
+        follow: true,
+        signal,
+      })) {
         emitLog(hooks, line);
       }
     } catch {
       // Log streaming is best-effort; never let it crash the deploy.
     }
+  }
+
+  /**
+   * Reverse-proxy (Traefik) routing labels for the ingress service, so the
+   * shared edge proxy routes `<slug>.<baseDomain>` to it over the edge network.
+   */
+  private proxyLabels(plan: PreviewPlan, service: ServicePlan): Record<string, string> {
+    const router = `sy-${plan.slug}`;
+    const port = service.ports[0]?.container ?? 80;
+    const host = `${plan.slug}.${this.baseDomain}`;
+    return {
+      "traefik.enable": "true",
+      "traefik.docker.network": this.edgeNetworkName!,
+      [`traefik.http.routers.${router}.rule`]: `Host(\`${host}\`)`,
+      [`traefik.http.routers.${router}.entrypoints`]: "web",
+      [`traefik.http.services.${router}.loadbalancer.server.port`]: String(port),
+    };
   }
 
   /** @inheritdoc */

@@ -20,6 +20,8 @@ import {
   parsePortString,
   parseStats,
   portConfig,
+  hostConfigFor,
+  DEFAULT_RESOURCE_LIMITS,
   restartPolicy,
   topologicalOrder,
   type PreviewPlan,
@@ -47,6 +49,7 @@ function svc(name: string, dependsOn: string[] = []): ServicePlan {
     volumes: [],
     dependsOn,
     restart: "unless-stopped",
+    ingress: false,
   };
 }
 
@@ -303,7 +306,7 @@ describe("ComposePlanner", () => {
 });
 
 describe("portConfig / restartPolicy", () => {
-  it("builds dockerode ExposedPorts + PortBindings, ephemeral when host omitted", () => {
+  it("binds published ports to loopback with an ephemeral host port (ignores compose host pins)", () => {
     const service = svc("api");
     service.ports = [
       { container: 3001, host: 8080, protocol: "tcp" },
@@ -311,9 +314,37 @@ describe("portConfig / restartPolicy", () => {
     ];
     const { exposed, bindings } = portConfig(service);
     expect(exposed).toHaveProperty("3001/tcp");
-    expect(bindings["3001/tcp"]).toEqual([{ HostPort: "8080" }]);
-    // No explicit host port → empty string lets the daemon assign one.
-    expect(bindings["9229/tcp"]).toEqual([{ HostPort: "" }]);
+    // Host pins are dropped and every binding is 127.0.0.1 + ephemeral so
+    // previews are not exposed on all interfaces and cannot collide on the host.
+    expect(bindings["3001/tcp"]).toEqual([{ HostIp: "127.0.0.1", HostPort: "" }]);
+    expect(bindings["9229/tcp"]).toEqual([{ HostIp: "127.0.0.1", HostPort: "" }]);
+  });
+
+  it("hardens the HostConfig for untrusted preview code", () => {
+    const service = svc("api");
+    const { bindings } = portConfig(service);
+    const hc = hostConfigFor(service, "shipyard-net", bindings);
+    // Resource guard rails applied (defaults when the plan sets none).
+    expect(hc.Memory).toBe(DEFAULT_RESOURCE_LIMITS.memoryBytes);
+    expect(hc.MemorySwap).toBe(hc.Memory); // swap disabled
+    expect(hc.NanoCpus).toBe(DEFAULT_RESOURCE_LIMITS.nanoCpus);
+    expect(hc.PidsLimit).toBe(DEFAULT_RESOURCE_LIMITS.pidsLimit);
+    // Privilege reduction.
+    expect(hc.CapDrop).toEqual(["ALL"]);
+    expect(hc.CapAdd).toContain("SETUID");
+    expect(hc.CapAdd).not.toContain("SYS_ADMIN");
+    expect(hc.SecurityOpt).toContain("no-new-privileges");
+    expect(hc.NetworkMode).toBe("shipyard-net");
+    expect(hc.Ulimits?.[0]).toMatchObject({ Name: "nofile" });
+  });
+
+  it("honours explicit per-service resource limits over the defaults", () => {
+    const service = svc("db");
+    service.resources = { memoryBytes: 256 * 1024 * 1024, nanoCpus: 500_000_000, pidsLimit: 128 };
+    const hc = hostConfigFor(service, "n", {});
+    expect(hc.Memory).toBe(256 * 1024 * 1024);
+    expect(hc.NanoCpus).toBe(500_000_000);
+    expect(hc.PidsLimit).toBe(128);
   });
 
   it("maps the restart enum onto dockerode RestartPolicy", () => {
@@ -433,6 +464,17 @@ describe("parseStats", () => {
       memory_stats: { usage: 0, limit: 0 },
     } as unknown as Docker.ContainerStats;
     expect(parseStats(raw, "cid", "x").cpuCores).toBe(0);
+  });
+
+  it("subtracts cgroup-v2 inactive_file from memory (not just v1 cache)", () => {
+    // cgroup v2 hosts report `inactive_file`, not `cache`; usage must exclude it
+    // to match `docker stats` (else file-heavy previews are over-billed).
+    const raw = {
+      cpu_stats: { cpu_usage: { total_usage: 0 }, system_cpu_usage: 0 },
+      precpu_stats: { cpu_usage: { total_usage: 0 }, system_cpu_usage: 0 },
+      memory_stats: { usage: 300, limit: 1_000, stats: { inactive_file: 120 } },
+    } as unknown as Docker.ContainerStats;
+    expect(parseStats(raw, "cid", "x").memoryBytes).toBe(180); // 300 - 120
   });
 });
 

@@ -122,9 +122,15 @@ export function networkNameFor(slug: string): string {
   return `shipyard-${slug}`;
 }
 
-/** Default named-volume prefix for a preview. */
-function volumeNameFor(slug: string, name: string): string {
-  return `shipyard-${slug}-${name}`;
+/**
+ * Deterministic named-volume name for a preview. Includes a slice of the
+ * (globally-unique) previewId so a destroyed-then-recreated slug (e.g. a
+ * reopened PR) gets FRESH volumes instead of silently remounting the prior
+ * preview's database contents.
+ */
+function volumeNameFor(previewId: string, slug: string, name: string): string {
+  const suffix = previewId.replace(/[^a-z0-9]/gi, "").slice(-8) || "0";
+  return `shipyard-${slug}-${suffix}-${name}`;
 }
 
 /** Build the deterministic label set stamped on every resource of a preview. */
@@ -160,7 +166,7 @@ export class ComposePlanner {
     const slug = input.slug;
     const env = input.env ?? {};
     const services = input.config?.composeFile
-      ? this.fromCompose(input.config.composeFile, slug, env)
+      ? this.fromCompose(input.config.composeFile, input.previewId, slug, env)
       : this.synthesizeDefault(input);
 
     if (services.length === 0) {
@@ -174,6 +180,11 @@ export class ComposePlanner {
     });
 
     const primaryServiceName = this.pickPrimaryService(services);
+    // Mark exactly the primary service as the externally-routed ingress so the
+    // orchestrator attaches it to the edge proxy network with routing labels.
+    for (const service of services) {
+      service.ingress = service.name === primaryServiceName;
+    }
 
     const draft: PreviewPlan = {
       previewId: input.previewId,
@@ -198,7 +209,12 @@ export class ComposePlanner {
    * Caller-supplied `env` is merged over each service's compose-declared
    * environment (caller values take precedence) so resolved secrets win.
    */
-  private fromCompose(composeFile: string, slug: string, env: Record<string, string>): ServicePlan[] {
+  private fromCompose(
+    composeFile: string,
+    previewId: string,
+    slug: string,
+    env: Record<string, string>,
+  ): ServicePlan[] {
     let doc: unknown;
     try {
       doc = parseYaml(composeFile);
@@ -216,7 +232,7 @@ export class ComposePlanner {
 
     const plans: ServicePlan[] = [];
     for (const [name, svc] of serviceEntries) {
-      plans.push(this.composeServiceToPlan(name, svc, slug, env));
+      plans.push(this.composeServiceToPlan(name, svc, previewId, slug, env));
     }
     return plans;
   }
@@ -225,6 +241,7 @@ export class ComposePlanner {
   private composeServiceToPlan(
     name: string,
     svc: ComposeService,
+    previewId: string,
     slug: string,
     callerEnv: Record<string, string>,
   ): ServicePlan {
@@ -243,7 +260,7 @@ export class ComposePlanner {
       draft.command = Array.isArray(svc.command) ? svc.command : ["sh", "-c", svc.command];
     }
     if (svc.volumes && svc.volumes.length > 0) {
-      draft.volumes = normalizeVolumes(svc.volumes, slug);
+      draft.volumes = normalizeVolumes(svc.volumes, previewId, slug);
     }
     const healthcheck = normalizeHealthcheck(svc.healthcheck);
     if (healthcheck) draft.healthcheck = healthcheck;
@@ -309,7 +326,9 @@ export class ComposePlanner {
             POSTGRES_DB: "shipyard",
           },
           ports: [{ container: 5432 }],
-          volumes: [{ name: volumeNameFor(input.slug, "pgdata"), mountPath: "/var/lib/postgresql/data" }],
+          volumes: [
+            { name: volumeNameFor(input.previewId, input.slug, "pgdata"), mountPath: "/var/lib/postgresql/data" },
+          ],
           healthcheck: {
             command: "pg_isready -U shipyard -d shipyard",
             intervalMs: 5_000,
@@ -329,7 +348,7 @@ export class ComposePlanner {
           image: cfg.cacheImage ?? "redis:7-alpine",
           command: ["redis-server", "--appendonly", "yes"],
           ports: [{ container: 6379 }],
-          volumes: [{ name: volumeNameFor(input.slug, "redisdata"), mountPath: "/data" }],
+          volumes: [{ name: volumeNameFor(input.previewId, input.slug, "redisdata"), mountPath: "/data" }],
           healthcheck: {
             command: "redis-cli ping",
             intervalMs: 5_000,
@@ -509,6 +528,7 @@ export function normalizeRestart(
 /** Normalize compose `volumes` (named + bind) into engine named-volume mounts. */
 export function normalizeVolumes(
   volumes: string[],
+  previewId: string,
   slug: string,
 ): Array<{ name: string; mountPath: string }> {
   const out: Array<{ name: string; mountPath: string }> = [];
@@ -519,7 +539,9 @@ export function normalizeVolumes(
     const mountPath = parts[1]!;
     // Only named volumes (not host bind mounts) are portable across hosts.
     const isNamed = !source.startsWith(".") && !source.startsWith("/") && !source.includes("/");
-    const name = isNamed ? volumeNameFor(slug, source) : volumeNameFor(slug, mountPath.replace(/[^a-z0-9]+/gi, "-"));
+    const name = isNamed
+      ? volumeNameFor(previewId, slug, source)
+      : volumeNameFor(previewId, slug, mountPath.replace(/[^a-z0-9]+/gi, "-"));
     out.push({ name, mountPath });
   }
   return out;

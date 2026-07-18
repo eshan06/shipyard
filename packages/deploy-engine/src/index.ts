@@ -33,12 +33,15 @@ export { topologicalOrder } from "./graph.js";
 export {
   DockerDriver,
   portConfig,
+  hostConfigFor,
   restartPolicy,
   dockerHealthcheck,
   parseStats,
+  DEFAULT_RESOURCE_LIMITS,
   type BuildLogEvent,
   type CreateContainerOptions,
   type DockerDriverOptions,
+  type RegistryAuth,
 } from "./docker.js";
 export {
   DockerOrchestrator,

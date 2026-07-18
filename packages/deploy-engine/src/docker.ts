@@ -27,6 +27,7 @@ import {
   ShipyardLabel,
   type Healthcheck,
   type LogLine,
+  type ResourceLimits,
   type ServicePlan,
   type ServiceStatsSample,
 } from "./types.js";
@@ -53,6 +54,20 @@ export interface CreateContainerOptions {
   labels: Record<string, string>;
   /** Preview slug, used to derive the container name. */
   slug: string;
+  /**
+   * Additional networks to attach the container to after start (e.g. the shared
+   * edge/proxy network for an ingress service). Each carries its own aliases.
+   */
+  extraNetworks?: Array<{ name: string; aliases?: string[] }>;
+}
+
+/** Registry credentials for authenticated image pulls/builds. */
+export interface RegistryAuth {
+  username: string;
+  password: string;
+  /** Registry hostname (e.g. `ghcr.io`). Defaults to Docker Hub. */
+  serveraddress?: string;
+  email?: string;
 }
 
 /** Construct-time options for {@link DockerDriver}. */
@@ -62,7 +77,32 @@ export interface DockerDriverOptions {
    * created from the ambient environment (`DOCKER_HOST` / default socket).
    */
   docker?: Docker;
+  /**
+   * Optional registry authentication, keyed by registry hostname, used when
+   * pulling/building images from private registries. Threaded into dockerode's
+   * `authconfig`/`registryconfig`.
+   */
+  registryAuth?: RegistryAuth[];
 }
+
+/**
+ * Least-privilege capability set added back after `CapDrop: [ALL]`. These are
+ * the caps mainstream base images (postgres, redis, node) need to start: change
+ * file ownership + drop privileges to a service user, bind low ports, and send
+ * signals. Everything else (raw sockets, ptrace, mount, module load, …) stays
+ * dropped so untrusted preview code cannot escalate.
+ */
+const DEFAULT_CAP_ADD: readonly string[] = [
+  "CHOWN",
+  "DAC_OVERRIDE",
+  "FOWNER",
+  "FSETID",
+  "SETGID",
+  "SETUID",
+  "SETPCAP",
+  "NET_BIND_SERVICE",
+  "KILL",
+];
 
 /**
  * Wrap an arbitrary dockerode rejection: if it indicates the daemon is
@@ -75,9 +115,42 @@ function rethrowDaemon(error: unknown): never {
 
 export class DockerDriver {
   private readonly docker: Docker;
+  private readonly registryAuth: Map<string, RegistryAuth>;
 
   constructor(options: DockerDriverOptions = {}) {
     this.docker = options.docker ?? new Docker();
+    this.registryAuth = new Map(
+      (options.registryAuth ?? []).map((a) => [
+        (a.serveraddress ?? "docker.io").replace(/^https?:\/\//, ""),
+        a,
+      ]),
+    );
+  }
+
+  /**
+   * Resolve the registry auth for an image reference by matching its registry
+   * host against the configured credentials. Returns `undefined` for images on
+   * registries we have no credentials for (public pulls).
+   */
+  private authFor(image: string): RegistryAuth | undefined {
+    if (this.registryAuth.size === 0) return undefined;
+    // `ghcr.io/owner/img:tag` → host is the first path segment iff it looks like
+    // a hostname (contains a dot or colon); otherwise it is an implicit Docker Hub image.
+    const first = image.split("/")[0] ?? "";
+    const host = /[.:]/.test(first) ? first : "docker.io";
+    return this.registryAuth.get(host);
+  }
+
+  /**
+   * Derive the host to dial for a client-side HTTP health probe against a
+   * daemon-published port. For a TCP `DOCKER_HOST` the published port lives on
+   * the remote daemon host, not the worker's loopback; for the local unix/npipe
+   * socket it is `127.0.0.1`.
+   */
+  probeHost(): string {
+    const modem = this.docker.modem as { host?: string; socketPath?: string };
+    if (modem.socketPath) return "127.0.0.1";
+    return modem.host && modem.host.length > 0 ? modem.host : "127.0.0.1";
   }
 
   /** The underlying dockerode handle (escape hatch for advanced callers). */
@@ -128,8 +201,12 @@ export class DockerDriver {
     service?: string,
   ): Promise<void> {
     let stream: NodeJS.ReadableStream;
+    const auth = this.authFor(image);
     try {
-      stream = (await this.docker.pull(image)) as NodeJS.ReadableStream;
+      stream = (await this.docker.pull(
+        image,
+        auth ? { authconfig: auth } : {},
+      )) as NodeJS.ReadableStream;
     } catch (error) {
       if (isDaemonUnavailable(error)) throw new DaemonUnavailableError(error);
       throw new ImagePullError(image, error, service);
@@ -179,6 +256,10 @@ export class DockerDriver {
           ...(options.target ? { target: options.target } : {}),
           ...(options.args ? { buildargs: options.args } : {}),
           ...(options.labels ? { labels: options.labels } : {}),
+          // Supply credentials for private base images referenced by FROM lines.
+          ...(this.registryAuth.size > 0
+            ? { registryconfig: this.buildRegistryConfig() }
+            : {}),
         },
       )) as NodeJS.ReadableStream;
     } catch (error) {
@@ -235,6 +316,13 @@ export class DockerDriver {
       [ShipyardLabel.serviceType]: service.kind,
     };
 
+    // Pre-create named volumes with the preview's labels so teardown
+    // (pruneByLabel) can find and remove them — the daemon's implicit
+    // auto-create from Binds leaves them unlabelled and therefore orphaned.
+    for (const vol of service.volumes) {
+      await this.ensureVolume(vol.name, labels);
+    }
+
     try {
       const container = await this.docker.createContainer({
         name: containerName,
@@ -246,12 +334,7 @@ export class DockerDriver {
         ...(service.healthcheck?.command
           ? { Healthcheck: dockerHealthcheck(service.healthcheck) }
           : {}),
-        HostConfig: {
-          NetworkMode: networkName,
-          PortBindings: bindings,
-          RestartPolicy: restartPolicy(service.restart),
-          Binds: service.volumes.map((v) => `${v.name}:${v.mountPath}`),
-        },
+        HostConfig: hostConfigFor(service, networkName, bindings),
         NetworkingConfig: {
           EndpointsConfig: {
             [networkName]: { Aliases: [networkAlias] },
@@ -259,11 +342,48 @@ export class DockerDriver {
         },
       });
       await container.start();
+
+      // Attach any extra networks (e.g. the shared edge/proxy network for the
+      // ingress service) after start, each with its own aliases.
+      for (const extra of options.extraNetworks ?? []) {
+        try {
+          await this.docker
+            .getNetwork(extra.name)
+            .connect({ Container: container.id, EndpointConfig: { Aliases: extra.aliases ?? [] } });
+        } catch (error) {
+          // A missing edge network must not silently drop routing — surface it.
+          if (isDaemonUnavailable(error)) throw new DaemonUnavailableError(error);
+          throw new ContainerStartError(service.name, error);
+        }
+      }
       return container.id;
     } catch (error) {
       if (isDaemonUnavailable(error)) throw new DaemonUnavailableError(error);
       throw new ContainerStartError(service.name, error);
     }
+  }
+
+  /**
+   * Ensure a named volume exists carrying the given labels. Idempotent:
+   * dockerode's `createVolume` is a no-op returning the existing volume when the
+   * name already exists, so this is safe to call on every deploy/retry.
+   */
+  async ensureVolume(name: string, labels: Record<string, string>): Promise<void> {
+    try {
+      await this.docker.createVolume({ Name: name, Labels: labels });
+    } catch (error) {
+      rethrowDaemon(error);
+    }
+  }
+
+  /** Build dockerode's `registryconfig` map from the configured credentials. */
+  private buildRegistryConfig(): Record<string, { username: string; password: string }> {
+    const out: Record<string, { username: string; password: string }> = {};
+    for (const auth of this.registryAuth.values()) {
+      const host = (auth.serveraddress ?? "https://index.docker.io/v1/").replace(/^https?:\/\//, "");
+      out[host] = { username: auth.username, password: auth.password };
+    }
+    return out;
   }
 
   /**
@@ -303,12 +423,24 @@ export class DockerDriver {
       if (state.Status === "exited" || state.Status === "dead") {
         throw new ContainerStartError(serviceName, new Error(`container exited (code ${state.ExitCode})`));
       }
+      // A container that has already restarted under a restart policy is
+      // crash-looping — surface it as a start failure with the exit code rather
+      // than waiting out the whole health budget for a generic timeout.
+      if (state.Status === "restarting" && (inspect.RestartCount ?? 0) >= 2) {
+        throw new ContainerStartError(
+          serviceName,
+          new Error(`container is crash-looping (restarts=${inspect.RestartCount}, code ${state.ExitCode})`),
+        );
+      }
 
       // HTTP probe takes precedence when configured.
       if (healthcheck?.httpPath) {
         const port = healthcheck.port ?? firstContainerPort(publishedPorts);
         const hostPort = port != null ? publishedPorts[port] : undefined;
-        if (hostPort != null && (await httpProbe(hostPort, healthcheck.httpPath, timeoutMs))) {
+        if (
+          hostPort != null &&
+          (await httpProbe(this.probeHost(), hostPort, healthcheck.httpPath, timeoutMs))
+        ) {
           return;
         }
       } else if (state.Health) {
@@ -351,10 +483,10 @@ export class DockerDriver {
   async *streamLogs(
     containerId: string,
     serviceName: string,
-    options: { follow?: boolean; since?: number; tail?: number } = {},
+    options: { follow?: boolean; since?: number; tail?: number; signal?: AbortSignal } = {},
   ): AsyncGenerator<LogLine, void, void> {
     const container = this.docker.getContainer(containerId);
-    let stream: NodeJS.ReadableStream;
+    let stream: NodeJS.ReadableStream & { destroy?: (err?: Error) => void };
     // dockerode discriminates `logs()`'s return type (Buffer vs ReadableStream)
     // on a *literal* `follow`, so a `boolean` value does not match either
     // overload. We always consume the result as a stream (demuxed below), so the
@@ -370,14 +502,29 @@ export class DockerDriver {
     try {
       stream = (await container.logs(
         logOptions as Docker.ContainerLogsOptions & { follow: true },
-      )) as unknown as NodeJS.ReadableStream;
+      )) as unknown as NodeJS.ReadableStream & { destroy?: (err?: Error) => void };
     } catch (error) {
       rethrowDaemon(error);
     }
 
+    // Bound a follow stream to a caller AbortSignal so healthy long-lived
+    // previews don't leak one open daemon stream per service forever.
+    const onAbort = () => stream.destroy?.();
+    if (options.signal) {
+      if (options.signal.aborted) {
+        stream.destroy?.();
+        return;
+      }
+      options.signal.addEventListener("abort", onAbort, { once: true });
+    }
+
     // Multiplexed Docker log frames: 8-byte header [stream, 0,0,0, size(4 BE)].
+    // Docker frames follow write() boundaries, not line boundaries, so we hold a
+    // per-stream partial-line remainder and only emit up to the last newline;
+    // the tail is carried into the next frame (flushed on stream end).
     const queue: LogLine[] = [];
     let buffer = Buffer.alloc(0);
+    const partial: { stdout: string; stderr: string } = { stdout: "", stderr: "" };
     let ended = false;
     let errored: unknown;
     let notify: (() => void) | undefined;
@@ -385,6 +532,17 @@ export class DockerDriver {
     const wake = () => {
       notify?.();
       notify = undefined;
+    };
+
+    const push = (which: "stdout" | "stderr", chunk: string, flush: boolean) => {
+      const combined = partial[which] + chunk;
+      const lines = combined.split("\n");
+      partial[which] = flush ? "" : (lines.pop() ?? "");
+      if (flush && lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+      for (const line of lines) {
+        if (line.length === 0) continue;
+        queue.push({ service: serviceName, stream: which, line, timestamp: Date.now() });
+      }
     };
 
     stream.on("data", (chunk: Buffer) => {
@@ -395,19 +553,14 @@ export class DockerDriver {
         if (buffer.length < 8 + size) break;
         const payload = buffer.subarray(8, 8 + size).toString("utf8");
         buffer = buffer.subarray(8 + size);
-        for (const line of payload.split("\n")) {
-          if (line.length === 0) continue;
-          queue.push({
-            service: serviceName,
-            stream: streamType === 2 ? "stderr" : "stdout",
-            line,
-            timestamp: Date.now(),
-          });
-        }
+        push(streamType === 2 ? "stderr" : "stdout", payload, false);
       }
       wake();
     });
     stream.on("end", () => {
+      // Flush any trailing partial lines (output without a final newline).
+      push("stdout", "", true);
+      push("stderr", "", true);
       ended = true;
       wake();
     });
@@ -417,19 +570,25 @@ export class DockerDriver {
       wake();
     });
 
-    while (true) {
-      if (queue.length > 0) {
-        yield queue.shift()!;
-        continue;
+    try {
+      while (true) {
+        if (queue.length > 0) {
+          yield queue.shift()!;
+          continue;
+        }
+        if (ended) {
+          if (errored && isDaemonUnavailable(errored)) throw new DaemonUnavailableError(errored);
+          // A caller-initiated abort surfaces as a benign stream close, not an error.
+          if (errored && !options.signal?.aborted) throw errored;
+          return;
+        }
+        await new Promise<void>((resolve) => {
+          notify = resolve;
+        });
       }
-      if (ended) {
-        if (errored && isDaemonUnavailable(errored)) throw new DaemonUnavailableError(errored);
-        if (errored) throw errored;
-        return;
-      }
-      await new Promise<void>((resolve) => {
-        notify = resolve;
-      });
+    } finally {
+      options.signal?.removeEventListener("abort", onAbort);
+      stream.destroy?.();
     }
   }
 
@@ -523,6 +682,18 @@ export class DockerDriver {
           if (!isNotModifiedOrMissing(error)) throw error;
         }
       }
+
+      // Remove images built for this preview (tagged + stamped with its labels),
+      // else every destroyed preview leaves its ~app-sized image (plus dangling
+      // layers from each redeploy) on disk forever.
+      const images = await this.docker.listImages({ filters: { label: [selector] } });
+      for (const img of images) {
+        try {
+          await this.docker.getImage(img.Id).remove({ force: true });
+        } catch (error) {
+          if (!isNotModifiedOrMissing(error)) throw error;
+        }
+      }
     } catch (error) {
       if (error instanceof DeployEngineError) throw error;
       rethrowDaemon(error);
@@ -534,20 +705,78 @@ export class DockerDriver {
 // Pure helpers (exported for unit testing)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Build dockerode `ExposedPorts` + `PortBindings` from a service plan. */
+/**
+ * Default resource limits applied to any service the planner did not bound
+ * explicitly, so even a bare compose service can never exhaust the host. Chosen
+ * to comfortably run a typical preview app/db while capping blast radius.
+ */
+export const DEFAULT_RESOURCE_LIMITS: Required<ResourceLimits> = {
+  memoryBytes: 1024 * 1024 * 1024, // 1 GiB
+  nanoCpus: 1_000_000_000, // 1.0 CPU
+  pidsLimit: 512,
+};
+
+/**
+ * Build dockerode `ExposedPorts` + `PortBindings` from a service plan.
+ *
+ * Every published port is bound to `127.0.0.1` (loopback) with an ephemeral
+ * host port: previews are reached through the reverse proxy over the Docker
+ * network, so host ports exist only for the worker's health probe + local
+ * debugging and MUST NOT be exposed on all interfaces. Any host port requested
+ * by a compose file is ignored (ephemeral only) to avoid cross-preview port
+ * collisions on the shared host.
+ */
 export function portConfig(service: ServicePlan): {
   exposed: Record<string, Record<string, never>>;
-  bindings: Record<string, Array<{ HostPort: string }>>;
+  bindings: Record<string, Array<{ HostIp: string; HostPort: string }>>;
 } {
   const exposed: Record<string, Record<string, never>> = {};
-  const bindings: Record<string, Array<{ HostPort: string }>> = {};
+  const bindings: Record<string, Array<{ HostIp: string; HostPort: string }>> = {};
   for (const port of service.ports) {
     const key = `${port.container}/${port.protocol}`;
     exposed[key] = {};
-    // Empty HostPort lets the daemon assign an ephemeral published port.
-    bindings[key] = [{ HostPort: port.host != null ? String(port.host) : "" }];
+    // Loopback-only, ephemeral host port (empty HostPort → daemon-assigned).
+    bindings[key] = [{ HostIp: "127.0.0.1", HostPort: "" }];
   }
   return { exposed, bindings };
+}
+
+/**
+ * Assemble the hardened `HostConfig` for a preview container. Previews run
+ * untrusted customer code, so every container is bounded and de-privileged:
+ * memory/CPU/PID caps, all Linux capabilities dropped (a minimal safe set added
+ * back), no privilege escalation, and a bounded file-descriptor ulimit.
+ */
+export function hostConfigFor(
+  service: ServicePlan,
+  networkName: string,
+  bindings: Record<string, Array<{ HostIp: string; HostPort: string }>>,
+): Docker.HostConfig {
+  const limits: Required<ResourceLimits> = {
+    memoryBytes: service.resources?.memoryBytes ?? DEFAULT_RESOURCE_LIMITS.memoryBytes,
+    nanoCpus: service.resources?.nanoCpus ?? DEFAULT_RESOURCE_LIMITS.nanoCpus,
+    pidsLimit: service.resources?.pidsLimit ?? DEFAULT_RESOURCE_LIMITS.pidsLimit,
+  };
+  return {
+    NetworkMode: networkName,
+    PortBindings: bindings,
+    RestartPolicy: restartPolicy(service.restart),
+    Binds: service.volumes.map((v) => `${v.name}:${v.mountPath}`),
+    // ── Resource guard rails ────────────────────────────────────────────────
+    Memory: limits.memoryBytes,
+    // Disable swap by pinning MemorySwap to Memory (else a container can use
+    // 2×Memory of swap and evade the cap).
+    MemorySwap: limits.memoryBytes,
+    NanoCpus: limits.nanoCpus,
+    PidsLimit: limits.pidsLimit,
+    // ── Privilege reduction ─────────────────────────────────────────────────
+    CapDrop: ["ALL"],
+    CapAdd: [...DEFAULT_CAP_ADD],
+    // Block setuid-based privilege escalation (sudo, ping, …) inside the container.
+    SecurityOpt: ["no-new-privileges"],
+    // Bound open file descriptors (cheap DoS guard).
+    Ulimits: [{ Name: "nofile", Soft: 4096, Hard: 8192 }],
+  };
 }
 
 /** Map the engine restart enum onto a dockerode RestartPolicy. */
@@ -596,8 +825,13 @@ export function parseStats(
     systemDelta > 0 && cpuDelta > 0 ? (cpuDelta / systemDelta) * onlineCpus : 0;
 
   const memory = raw.memory_stats;
-  const cache = memory?.stats?.cache ?? 0;
-  const memoryBytes = Math.max(0, (memory?.usage ?? 0) - cache);
+  // Exclude page cache from reported memory, mirroring `docker stats`. cgroup v2
+  // (default on modern hosts) reports `inactive_file`; cgroup v1 uses `cache` /
+  // `total_inactive_file`. Prefer whichever the daemon supplied.
+  const memStats = (memory?.stats ?? {}) as Record<string, number>;
+  const reclaimable =
+    memStats.inactive_file ?? memStats.total_inactive_file ?? memStats.cache ?? 0;
+  const memoryBytes = Math.max(0, (memory?.usage ?? 0) - reclaimable);
   const memoryLimitBytes = memory?.limit ?? 0;
 
   let rxBytes = 0;
@@ -628,11 +862,11 @@ function firstContainerPort(published: Record<number, number>): number | undefin
   return keys[0];
 }
 
-/** Perform a single HTTP GET probe against `127.0.0.1:port`. Resolves true if `< 500`. */
-function httpProbe(port: number, path: string, timeoutMs: number): Promise<boolean> {
+/** Perform a single HTTP GET probe against `host:port`. Resolves true if `< 500`. */
+function httpProbe(host: string, port: number, path: string, timeoutMs: number): Promise<boolean> {
   return new Promise((resolve) => {
     const req = httpRequest(
-      { host: "127.0.0.1", port, path, method: "GET", timeout: timeoutMs },
+      { host, port, path, method: "GET", timeout: timeoutMs },
       (res) => {
         res.resume(); // drain
         resolve((res.statusCode ?? 500) < 500);

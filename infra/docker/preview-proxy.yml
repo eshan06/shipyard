@@ -1,0 +1,74 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Shipyard preview reverse proxy (Traefik).
+#
+# Every RUNNING preview needs a public URL of the form `<slug>.<PREVIEW_BASE_DOMAIN>`
+# that reaches its ingress container. Shipyard's docker deploy driver publishes
+# preview ports only on the host loopback (never 0.0.0.0), so a shared edge
+# proxy is what makes previews reachable from outside the host.
+#
+# How it works
+#   • This stack runs Traefik on a shared Docker network named `shipyard-edge`.
+#   • The deploy worker (DEPLOY_DRIVER=docker, PREVIEW_EDGE_NETWORK=shipyard-edge)
+#     attaches each preview's *ingress* service to `shipyard-edge` and stamps it
+#     with Traefik routing labels (traefik.http.routers.<slug>.rule=Host(...)).
+#   • Traefik discovers those labels via the Docker provider and routes
+#     `<slug>.<domain>` → the ingress container over `shipyard-edge`.
+#
+# Ordering: start THIS stack first — it creates the `shipyard-edge` network the
+# worker connects previews to. Point a wildcard DNS record `*.<PREVIEW_BASE_DOMAIN>`
+# at this host.
+#
+#   docker compose -f infra/docker/preview-proxy.yml up -d
+#
+# TLS: for real domains, enable Traefik's ACME resolver (commented below) and
+# open :443. For local/dev, plain `:80` + a wildcard hosts entry is enough.
+#
+# SECURITY: Traefik mounts the Docker socket read-only to watch container
+# labels. The socket is root-equivalent — run this proxy on the preview host
+# only, isolated from the control-plane (api/worker/db) host, and never expose
+# the Traefik dashboard publicly (it is disabled here).
+# ──────────────────────────────────────────────────────────────────────────
+name: shipyard-preview-proxy
+
+services:
+  traefik:
+    image: traefik:v3.1
+    restart: unless-stopped
+    command:
+      - --providers.docker=true
+      # Do NOT route a container unless it explicitly opts in with
+      # traefik.enable=true (the worker sets this only on the ingress service).
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=shipyard-edge
+      - --entrypoints.web.address=:80
+      # Dashboard/API stays off (never expose it publicly).
+      - --api.dashboard=false
+      - --ping=true
+      - --log.level=INFO
+      # ── TLS (uncomment for real domains) ──────────────────────────────────
+      # - --entrypoints.websecure.address=:443
+      # - --certificatesresolvers.le.acme.email=you@example.com
+      # - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
+      # - --certificatesresolvers.le.acme.tlschallenge=true
+    ports:
+      - "80:80"
+      # - "443:443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # - letsencrypt:/letsencrypt
+    networks:
+      - shipyard-edge
+    healthcheck:
+      test: ["CMD", "traefik", "healthcheck", "--ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  # The shared edge network. Its explicit name is what the worker's
+  # PREVIEW_EDGE_NETWORK must be set to. Created by this stack; previews attach.
+  shipyard-edge:
+    name: shipyard-edge
+    driver: bridge
+# volumes:
+#   letsencrypt:

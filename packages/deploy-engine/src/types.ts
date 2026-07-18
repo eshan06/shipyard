@@ -106,6 +106,23 @@ export const buildSpecSchema = z.object({
 export type BuildSpec = z.infer<typeof buildSpecSchema>;
 
 /**
+ * Per-container resource limits enforced on the daemon via `HostConfig`. These
+ * are the guard rails that keep one (potentially malicious or buggy) preview
+ * from exhausting the shared host: memory cap, CPU quota, and a process cap.
+ * All fields are optional; the planner fills kind-appropriate defaults so every
+ * synthesized service is bounded even when a compose file specifies nothing.
+ */
+export const resourceLimitsSchema = z.object({
+  /** Hard memory limit in bytes. Container is OOM-killed above this. */
+  memoryBytes: z.number().int().positive().optional(),
+  /** CPU quota expressed in nano-CPUs (1e9 == one full core). */
+  nanoCpus: z.number().int().positive().optional(),
+  /** Maximum number of processes/threads (PID cap; fork-bomb guard). */
+  pidsLimit: z.number().int().positive().optional(),
+});
+export type ResourceLimits = z.infer<typeof resourceLimitsSchema>;
+
+/**
  * Container-level healthcheck. The engine prefers an HTTP probe (`httpPath`)
  * when set; otherwise it falls back to the container's own Docker HEALTHCHECK
  * (or to a "running" check when neither is available).
@@ -159,10 +176,19 @@ export const servicePlanSchema = z
       .default([]),
     /** Healthcheck configuration. */
     healthcheck: healthcheckSchema.optional(),
+    /** Resource limits (memory/CPU/PIDs) enforced on the daemon. */
+    resources: resourceLimitsSchema.optional(),
     /** Names of services that must be healthy before this one starts. */
     dependsOn: z.array(z.string().min(1)).default([]),
     /** Docker restart policy. Defaults to `unless-stopped` for long-lived services. */
     restart: z.enum(["no", "always", "on-failure", "unless-stopped"]).default("unless-stopped"),
+    /**
+     * When true this is the preview's externally-routed ingress service: the
+     * orchestrator attaches it to the shared edge/proxy network and stamps the
+     * per-preview routing labels the reverse proxy reads. Defaults to `false`;
+     * the planner marks exactly the primary service.
+     */
+    ingress: z.boolean().default(false),
   })
   .superRefine((plan, ctx) => {
     const hasImage = Boolean(plan.image);

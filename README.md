@@ -145,4 +145,10 @@ To build container images and deploy with Docker Compose or Kubernetes, see
 
 ## Status
 
-Under active construction — see [`PROGRESS.md`](./PROGRESS.md).
+Feature-complete and production-hardened. The full stack runs locally today
+(mock mode out of the box; the real Docker deploy path is implemented, hardened,
+and end-to-end verified). What remains before a real launch is provisioning —
+a Docker host / cluster, GitHub App + OAuth credentials, domains + DNS, a
+registry, and managed Postgres/Redis. See [`docs/GO_LIVE.md`](./docs/GO_LIVE.md)
+for the prioritized go-live checklist and [`PROGRESS.md`](./PROGRESS.md) for the
+build log.

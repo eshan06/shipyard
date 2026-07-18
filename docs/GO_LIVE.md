@@ -1,9 +1,17 @@
 # Shipyard — Go-Live Handoff
 
 **Audience:** the next engineer (likely me, Claude, in a future session) picking this back up.
-**Last updated:** 2026-06-15, end of the "run-readiness + redesign + perf" session.
-**Repo state:** `main` @ `bae3619`, pushed to `github.com/eshan06/shipyard` (private), co-author-clean.
-All gates green: **lint 11/11 · typecheck 11/11 · build 7/7 · test 191**.
+**Last updated:** 2026-07-17, end of the "production-hardening" session.
+**Repo state:** `main`, pushed to `github.com/eshan06/shipyard` (private), co-author-clean.
+All gates green: **lint 11/11 · typecheck 11/11 · build 7/7 · 218 unit tests +
+5 live integration tests + a real docker-driver e2e**.
+
+> **What changed 2026-07-17:** the entire *agent-owned* go-live track in §4 below
+> is now done, and the docker deploy path was validated end-to-end for the first
+> time. The one critical risk (§3) is resolved. What's left is the **`(you)`
+> provisioning track** (accounts, host/cluster, domains, secrets). See
+> `PROGRESS.md` Phase 8 for the full list of what landed. The §4 items keep their
+> original text with a **✅ DONE** / **⏳ (you)** marker prepended.
 
 > Read this with [[memory]]: `build-on-fast-fs-mirror`, `dashboard-redesign`,
 > `web-perf-barrel-and-dev`, `no-claude-coauthor`, `github-remote`,
@@ -73,16 +81,21 @@ the page rewrites, and the production audit; a headless-Chrome screenshot harnes
 
 ---
 
-## 3. ⚠️ The one critical risk
+## 3. ✅ The one critical risk — RESOLVED (2026-07-17)
 
-**Previews run arbitrary customer code with essentially ZERO container isolation.**
-`packages/deploy-engine/src/docker.ts:219-267` (`createAndStart`) sets no `Memory`/`NanoCpus`/
-`PidsLimit`, no `CapDrop`, no `ReadonlyRootfs`, no `SecurityOpt` (no-new-privileges/seccomp), no
-network egress controls — and the worker talks to the **host Docker socket** (`/var/run/docker.sock`).
-A single malicious/buggy preview can exhaust the host, reach other tenants, or escalate to host root.
-It's masked only because everything runs `DEPLOY_DRIVER=mock`. **This MUST be hardened before any
-untrusted PR is deployed for real** (and ideally moved off the host socket → rootless/Kata/Firecracker
-or a constrained per-tenant node). This is P0 and is on me (agent).
+Previews used to run arbitrary customer code with **zero** container isolation.
+`createAndStart`/`hostConfigFor` now set `Memory`+`MemorySwap`, `NanoCpus`,
+`PidsLimit`, `CapDrop:[ALL]` + a minimal cap set, `SecurityOpt:[no-new-privileges]`,
+and an `nofile` ulimit; ports publish on `127.0.0.1` only (never 0.0.0.0), and
+the reverse proxy fronts previews over a shared Docker network. Verified on a
+live container by the docker-driver e2e (build→run→route→inspect→destroy).
+
+**Residual hardening still worth doing** (defense-in-depth, not blocking a
+first internal launch): the worker still talks to the **host Docker socket**, so
+for a genuinely multi-tenant / public deployment move off the host socket →
+rootless Docker / Kata / Firecracker or a constrained per-tenant node, add
+seccomp/AppArmor profiles, and network-egress policy. `ReadonlyRootfs` was left
+off by default because most app/db images need a writable root.
 
 ---
 
@@ -165,21 +178,35 @@ Legend: **[P0]** blocks any real deploy · **[P1]** before real traffic · **[P2
 
 ---
 
-## 5. Suggested next-session order (highest leverage first)
+## 5. What's done vs. what's left
 
-Most of the engineering can be done **without any external accounts** — the user's items are
-provisioning. Recommended path:
+**✅ Done this session (the whole agent-owned track from §4):** docker
+orchestrator hardening (A/§3), per-preview reverse proxy (A) + a real
+docker-driver e2e (A), repo checkout + env injection + registry auth (A/B),
+GitHub App integration in code (B), release CI + docker-build gate + migrations
+in CI (C), k8s placeholder fixes + secret-file rename (C), security hardening —
+env-gated trustProxy, strict CSP, `SECURITY.md`, token-scope enforcement (D),
+`/metrics` observability + PRISMA_LOG (E), the P0 web prod-proxy fix + web UX
+(logout, error boundaries, honest chrome, fonts, mobile), and this docs refresh
+(G). See `PROGRESS.md` Phase 8.
 
-1. **Harden the docker orchestrator (§3 / A)** + **stand up the per-preview reverse proxy** +
-   **run a real docker-driver e2e in the sandbox** (Docker is available here). This validates and
-   secures the core product — the biggest unknown — and is fully doable agent-side.
-2. **Release CI workflow** (build + push images) + **slim the images** + **release-safe migrate Job**.
-3. **Security hardening** (env-gate trustProxy, scope CSP, draft `SECURITY.md`).
-4. **GitHub App integration in code** (octokit: installation tokens, clone, PR status).
-5. **Observability** (/metrics, tracing, error tracking) + **docs refresh**.
+**⏳ Left — the `(you)` provisioning track (needs accounts/credentials/decisions):**
+1. A **Docker host** for the worker (`DEPLOY_DRIVER=docker` + socket/`DOCKER_HOST`)
+   and the preview proxy running (`infra/docker/preview-proxy.yml`,
+   `PREVIEW_EDGE_NETWORK=shipyard-edge`, wildcard DNS `*.<domain>`).
+2. **GitHub OAuth app** + **GitHub App** (App id, private key, webhook secret) →
+   set the `GITHUB_*` envs; keep `DEV_AUTH=false`.
+3. **Registry + GHCR push** (release.yml uses the built-in GITHUB_TOKEN),
+   **domains + DNS**, **cluster** (ingress-nginx + cert-manager), managed
+   **Postgres + Redis**, and the **real k8s Secret** (`20-secret.example.yaml`).
+4. Generate + vault `SESSION_SECRET` / `SECRETS_ENCRYPTION_KEY`; replace the dev
+   webhook secret. Fill `[[SECURITY_CONTACT_EMAIL]]`; counsel review of `legal/`
+   (public launch only).
 
-In parallel, the **user** works the provisioning track: registry, domains+DNS, cluster+ingress+
-cert-manager, Postgres+Redis, GitHub OAuth app + GitHub App, real secrets, and (for public) counsel.
+**Remaining agent-doable hardening (non-blocking, defense-in-depth):** slim the
+container images; session revocation (per-user token-version claim); move the
+worker off the host Docker socket → rootless/Kata/Firecracker for true
+multi-tenant isolation; seccomp/AppArmor + egress policy on preview containers.
 
 ---
 

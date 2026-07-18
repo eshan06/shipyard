@@ -1,25 +1,22 @@
 # Shipyard — Build Progress & Backlog
 
-**Status:** Phases 0–7 complete; runnable, redesigned, perf-tuned, all gates green.
+**Status:** Phases 0–8 complete. The core-product path (real docker deploys) is
+implemented, hardened, and end-to-end verified; the agent-owned go-live track is
+done. Remaining items are provisioning/credentials (the `(you)` list below).
 **→ For the production roadmap and next steps, see [`docs/GO_LIVE.md`](docs/GO_LIVE.md)**
-(and [`docs/RESUME_PROMPT.md`](docs/RESUME_PROMPT.md) to resume). `docs/RETURN_HANDOFF.md` predates
-the 2026-06-15 redesign/run-readiness session and is partly stale.
-**Last updated:** 2026-06-15 (run-readiness + engineering-terminal redesign + perf + go-live audit)
+(and [`docs/RESUME_PROMPT.md`](docs/RESUME_PROMPT.md) to resume).
+**Last updated:** 2026-07-17 (production-hardening session — see Phase 8 below).
 
 ## Build note (for resuming agents)
-Moving off OneDrive did NOT fix the filesystem: the working tree
-(`C:\Users\toesh\newGithub\shipyard`) is a **virtiofs bind mount** that rejects
-symlinks (pnpm's default linker fails with `ERR_PNPM_EPERM symlink`) and is slow
-for IO. Keep `.git` + source here and **commit here**, but build/verify on the
-fast `overlay` FS mirror at `/home/agent/build/shipyard`:
-- `bash /home/agent/sync.sh`  — rsync canonical → mirror (preserves node_modules/dist/.next/.turbo/generated)
-- `bash /home/agent/gate.sh [typecheck|build|test|all]`  — run gates on the mirror
-- one-time mirror setup: `pnpm install --store-dir /home/agent/.pnpm-store` then `pnpm --filter @shipyard/db generate`
-
-The committed `.npmrc` is intentionally clean (default symlinked linker) — correct
-for real environments (Windows native, CI, Docker); the symlink issue is
-sandbox-virtiofs-only. The old write-glitch (`</content>` trailing artifact) is
-gone. See the `build-on-fast-fs-mirror` memory.
+The working tree (`C:\Users\toesh\newGithub\shipyard`) now builds **natively on
+Windows**: `pnpm install`, all gates (`pnpm typecheck|lint|build|test`), Docker
+Desktop, and `pnpm infra:up` all work in-place — the old sandbox-virtiofs symlink
+constraint no longer applies. Two Windows-specific notes:
+- Prisma's **schema/migration engine** can't resolve `localhost` (it tries IPv6
+  `::1`); use `127.0.0.1` in `DATABASE_URL` for `prisma migrate`/`studio`. The
+  Prisma *query* engine (app + seed) handles `localhost` fine.
+- Turbo doesn't pass `DATABASE_URL` through to test tasks, so the DB-gated API
+  integration tests skip under `pnpm test`; run them directly with the env set.
 
 ## Done
 - [x] Phase 0 — repo/monorepo foundation, infra compose, Prisma model, docs
@@ -57,16 +54,61 @@ gone. See the `build-on-fast-fs-mirror` memory.
         data; dismissible; emits onboarding events) + `docs/ONBOARDING.md`.
       • Added the web test suite (vitest config + 11 tests) — fixes the previously-red
         web `test` gate. History rewritten to drop the Claude co-author trailer.
+- [x] Phase 8 — Production hardening (2026-07-17). Worked the agent-owned go-live
+      track; **the docker deploy path was validated end-to-end for the first time**
+      (real build→run→route→harden→destroy against a live daemon). Highlights:
+      • **Container isolation (P0):** every preview container now runs with Memory/
+        NanoCpus/PidsLimit caps, `CapDrop:[ALL]` + a minimal cap set, no-new-privileges,
+        an nofile ulimit, and ports published on `127.0.0.1` only (never 0.0.0.0).
+        Verified on a live container by the e2e.
+      • **Reverse proxy (P0):** Traefik (`infra/docker/preview-proxy.yml`) + per-preview
+        routing labels on the ingress service over a shared edge network so
+        `<slug>.<domain>` routes to the right container.
+      • **Real deploys (P0):** the deploy worker now checks the PR commit out (git,
+        path-traversal-guarded; GitHub App token for private repos) and injects the
+        project's decrypted `EnvVar`s — previously it tar'd the worker's own cwd and
+        never injected env.
+      • **Web prod fix (P0):** replaced the build-time API rewrite (baked
+        `localhost:4000`) with a runtime proxy route handler — the dashboard now works
+        in prod compose/k8s.
+      • **Concurrency/failure hardening (P1):** atomic compare-and-swap status
+        transitions (no more resurrecting a DESTROYED preview / forcing illegal
+        transitions), deploy supersession guard, final-attempt failure finalizer +
+        leaked-container teardown, cleanup reconciler for stranded previews, log/cost
+        retention, BullMQ `deduplication` for destroys, `upsertJobScheduler`, cost-gap
+        clamp, seq-allocator fix, exit-on-uncaughtException.
+      • **API security (P1):** token **scopes are now enforced** (was a no-op),
+        cross-team PR-list leak closed, Swagger prod-gated, strict global CSP (+relaxed
+        `/docs`), env-gated `TRUST_PROXY`, `SESSION_SECRET` min 32.
+      • **Observability:** Prometheus `/metrics` on api + worker (prom-client).
+      • **GitHub App integration in code** (installation tokens + PR commit status).
+      • **Ops/CI:** compose prod env-flow fixed + self-ordering migrate + resource
+        limits/log rotation; CI runs migrations + a docker-build matrix; new
+        `release.yml` builds/pushes the 3 images to GHCR on a tag; k8s placeholder
+        Secret renamed to `*.example.yaml` (no clobber-on-apply); `SECURITY.md` authored.
+      • Web UX: real logout menu, error boundaries, honest chrome (no fabricated
+        status/version), self-hosted fonts, mobile layout, auth-guard 401-only redirect.
+      • Gates: **typecheck 11/11 · lint 11/11 · build 7/7 · 218 unit tests +
+        5 live integration + docker e2e**. Fixes committed in logical commits (no
+        co-author trailer, per the standing convention).
 
-## Blocked-on-user (return handoff — see docs/RETURN_HANDOFF.md)
-- [x] **Pushed to https://github.com/eshan06/shipyard** (private, 2026-06-15) —
-      co-author-clean history; only `main` pushed (backup tag kept local).
-- [!] `pnpm install` on your machine (node_modules not synced).
-- [!] GitHub App (App ID/private key/webhook secret) for real PR webhooks.
-- [!] GitHub OAuth app (client id/secret) for dashboard login; set DEV_AUTH=false.
-- [!] DEPLOY_DRIVER=docker + a Docker host for real (non-mock) preview deploys.
-- [!] Fill k8s image refs/hostnames in infra/k8s/.
+## Blocked-on-user (provisioning / credentials — the only things left for prod)
+- [x] **Pushed to https://github.com/eshan06/shipyard** (private) — co-author-clean.
+- [!] **GitHub App** (App ID + private key + webhook secret) — now *implemented in
+      code* (`apps/worker/src/github.ts`); set `GITHUB_APP_ID`/`GITHUB_APP_PRIVATE_KEY`
+      + a real `GITHUB_WEBHOOK_SECRET` to activate private-repo checkout + PR status.
+- [!] **GitHub OAuth app** (client id/secret) for dashboard login; keep `DEV_AUTH=false`.
+- [!] **A Docker host for the worker** (`DEPLOY_DRIVER=docker` + `DOCKER_HOST`/socket)
+      and the preview reverse proxy up (`infra/docker/preview-proxy.yml`,
+      `PREVIEW_EDGE_NETWORK=shipyard-edge`).
+- [!] **Registry + GHCR push creds** (the `release.yml` uses the built-in GITHUB_TOKEN),
+      **domains + wildcard DNS** (`*.<PREVIEW_BASE_DOMAIN>`), a **cluster** (ingress-nginx +
+      cert-manager), managed **Postgres + Redis**, and the real **k8s Secret**
+      (see `infra/k8s/20-secret.example.yaml` + `infra/k8s/README.md`).
+- [!] Fill `[[SECURITY_CONTACT_EMAIL]]` in `SECURITY.md`; counsel review of `legal/`
+      (public launch only).
 
 ## Known follow-ups (non-blocking)
-- Container image size (~1.8–2GB) — slim via `pnpm deploy` (docs/DEPLOYMENT.md).
-- Bound `trustProxy` to the real proxy / deploy behind XFF-stripping proxy.
+- Container image size (~1.8–2GB) — slim via `pnpm deploy` / Next standalone.
+- Session revocation is not implemented (stateless 30-day JWT); add a
+  per-user token-version claim before high-value production traffic.

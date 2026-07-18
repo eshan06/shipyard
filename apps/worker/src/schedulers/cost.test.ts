@@ -90,11 +90,12 @@ describe("runCostTick", () => {
     expect(Number(record.cpuSeconds)).toBeGreaterThan(0);
   });
 
-  it("continues the period from the previous record's periodEnd", async () => {
+  it("continues the period from the previous record's periodEnd (within the window)", async () => {
     const previews: Row[] = [
       { id: "prev-1", status: "RUNNING", projectId: "proj-1" },
     ];
-    const lastEnd = new Date(now.getTime() - HOUR_MS);
+    // A gap shorter than the clamp (< 2× COST_INTERVAL_MS) bills the exact span.
+    const lastEnd = new Date(now.getTime() - config.COST_INTERVAL_MS);
     const costRecords: Row[] = [
       { id: "cost-0", previewId: "prev-1", periodEnd: lastEnd },
     ];
@@ -111,5 +112,32 @@ describe("runCostTick", () => {
     const newest = tables.costRecords.find((c) => c.id !== "cost-0")!;
     expect(newest.periodStart).toEqual(lastEnd);
     expect(newest.periodEnd).toEqual(now);
+  });
+
+  it("clamps a long gap (worker outage / stopped preview) so it isn't billed in one lump", async () => {
+    const previews: Row[] = [
+      { id: "prev-1", status: "RUNNING", projectId: "proj-1" },
+    ];
+    // A 1-hour gap must NOT be charged as a full hour: it is clamped to a couple
+    // of sampling intervals so downtime/STOPPED windows don't inflate spend.
+    const lastEnd = new Date(now.getTime() - HOUR_MS);
+    const costRecords: Row[] = [
+      { id: "cost-0", previewId: "prev-1", periodEnd: lastEnd },
+    ];
+    const { client, tables } = createFakePrisma({ previews, costRecords });
+    const orchestrator = {
+      collectStats: async (): Promise<ServiceStatsSample[]> => [],
+    };
+
+    await runCostTick(
+      { prisma: client, orchestrator, config, logger: testLogger() },
+      now,
+    );
+
+    const newest = tables.costRecords.find((c) => c.id !== "cost-0")!;
+    expect(newest.periodEnd).toEqual(now);
+    const billedMs = now.getTime() - (newest.periodStart as Date).getTime();
+    expect(billedMs).toBeLessThanOrEqual(2 * config.COST_INTERVAL_MS);
+    expect(billedMs).toBeLessThan(HOUR_MS);
   });
 });

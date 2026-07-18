@@ -158,4 +158,43 @@ describe("runCleanupTick", () => {
     expect(added).toHaveLength(1);
     expect(added[0]?.data).toEqual({ previewId: "prev-idle", reason: "idle" });
   });
+
+  it("reconciles a preview stranded mid-deploy: fails it and enqueues teardown", async () => {
+    const stale = new Date(NOW.getTime() - 999 * 60_000);
+    const previews: Row[] = [
+      {
+        id: "prev-stuck",
+        status: "BUILDING",
+        isPinned: false,
+        lastActivityAt: stale,
+        updatedAt: stale,
+        autoStopMinutes: 120,
+        project: { destroyTtlMinutes: 60 },
+        pullRequest: null,
+      },
+    ];
+    const { client, tables } = createFakePrisma({ previews });
+    const added: Array<{ data: unknown }> = [];
+    const destroyQueue = {
+      add: async (_name: string, data: unknown) => (added.push({ data }), { id: "1" }),
+    } as unknown as Queue;
+
+    await runCleanupTick({ prisma: client, destroyQueue, config, logger: testLogger() }, NOW);
+
+    expect(tables.previews[0]!.status).toBe("FAILED");
+    expect(added.some((a) => (a.data as { previewId: string }).previewId === "prev-stuck")).toBe(true);
+  });
+
+  it("prunes log chunks and cost records past their retention window", async () => {
+    const old = new Date(NOW.getTime() - 400 * 86_400_000); // 400 days ago
+    const logChunks: Row[] = [{ id: "log-old", deploymentId: "d", timestamp: old, seq: 0 }];
+    const costRecords: Row[] = [{ id: "cost-old", previewId: "p", periodEnd: old }];
+    const { client, tables } = createFakePrisma({ logChunks, costRecords });
+    const destroyQueue = { add: async () => ({ id: "1" }) } as unknown as Queue;
+
+    await runCleanupTick({ prisma: client, destroyQueue, config, logger: testLogger() }, NOW);
+
+    expect(tables.logChunks).toHaveLength(0);
+    expect(tables.costRecords).toHaveLength(0);
+  });
 });

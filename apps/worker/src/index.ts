@@ -11,7 +11,7 @@
  * @module
  */
 
-import { Queue } from "bullmq";
+import { Queue, type Worker } from "bullmq";
 
 import { QUEUE } from "@shipyard/core";
 import { prisma } from "@shipyard/db";
@@ -19,7 +19,9 @@ import { prisma } from "@shipyard/db";
 import { loadConfig } from "./config.js";
 import { bullConnection, closeConnection, createConnection } from "./connection.js";
 import { createEventPublisher } from "./events.js";
+import { GitHubApp } from "./github.js";
 import { createLogger } from "./logger.js";
+import { createWorkerMetrics, startMetricsServer } from "./metrics.js";
 import { createOrchestrator } from "./orchestrator.js";
 import { createCleanupWorker } from "./schedulers/cleanup.js";
 import { createCostWorker } from "./schedulers/cost.js";
@@ -38,6 +40,8 @@ async function main(): Promise<void> {
   const connection = createConnection(config);
   const orchestrator = createOrchestrator(config, logger);
   const events = createEventPublisher({ connection, logger });
+  const githubApp = GitHubApp.fromConfig(config, logger);
+  if (githubApp) logger.info("GitHub App configured (private-repo checkout + PR status enabled)");
 
   // Producer-side queues the workers/schedulers enqueue onto.
   const bull = bullConnection(connection);
@@ -53,6 +57,8 @@ async function main(): Promise<void> {
     config,
     logger,
     connection,
+    destroyQueue,
+    githubApp,
   });
   const destroyWorker = createDestroyWorker({
     prisma,
@@ -77,26 +83,37 @@ async function main(): Promise<void> {
     connection,
   });
 
-  // Register the repeatable scheduler jobs (idempotent on a fixed jobId).
-  await cleanupQueue.add(
-    QUEUE.cleanup,
-    {},
-    {
-      jobId: "cleanup-repeat",
-      repeat: { every: config.CLEANUP_INTERVAL_MS },
-      removeOnComplete: true,
-      removeOnFail: true,
-    },
+  // ── Metrics ────────────────────────────────────────────────────────────────
+  const metrics = createWorkerMetrics();
+  const metricsServer = startMetricsServer(metrics, config, logger);
+  const trackOutcomes = (worker: Worker, queue: string): void => {
+    worker.on("completed", (job) => {
+      metrics.recordJob(queue, "completed");
+      if (job?.processedOn && job.finishedOn) {
+        metrics.observeDuration(queue, (job.finishedOn - job.processedOn) / 1000);
+      }
+    });
+    worker.on("failed", () => metrics.recordJob(queue, "failed"));
+  };
+  trackOutcomes(deployWorker, QUEUE.deploy);
+  trackOutcomes(destroyWorker, QUEUE.destroy);
+  trackOutcomes(cleanupWorker, QUEUE.cleanup);
+  trackOutcomes(costWorker, QUEUE.cost);
+
+  // Register the repeatable scheduler jobs via the job-scheduler API, which is
+  // keyed by a stable scheduler id and REPLACES the schedule on re-register.
+  // (The legacy `add(..., { repeat })` API keys the repeat on the interval, so
+  // changing CLEANUP_INTERVAL_MS/COST_INTERVAL_MS would leave the old schedule
+  // ticking forever alongside the new one.)
+  await cleanupQueue.upsertJobScheduler(
+    "cleanup-repeat",
+    { every: config.CLEANUP_INTERVAL_MS },
+    { name: QUEUE.cleanup, opts: { removeOnComplete: true, removeOnFail: true } },
   );
-  await costQueue.add(
-    QUEUE.cost,
-    {},
-    {
-      jobId: "cost-repeat",
-      repeat: { every: config.COST_INTERVAL_MS },
-      removeOnComplete: true,
-      removeOnFail: true,
-    },
+  await costQueue.upsertJobScheduler(
+    "cost-repeat",
+    { every: config.COST_INTERVAL_MS },
+    { name: QUEUE.cost, opts: { removeOnComplete: true, removeOnFail: true } },
   );
 
   logger.info(
@@ -114,8 +131,15 @@ async function main(): Promise<void> {
   process.on("unhandledRejection", (reason) => {
     logger.error({ err: reason }, "unhandled promise rejection");
   });
+  // An uncaught exception may have fired mid-await inside a job processor or
+  // ioredis/BullMQ internals, leaving locks / the shared connection / Prisma in
+  // an undefined state. Resuming is unsafe (BullMQ would keep renewing locks on
+  // effectively-dead jobs, so stalled-job recovery never requeues them). Log,
+  // shut down cleanly, and exit non-zero so the supervisor restarts us and
+  // BullMQ requeues the in-flight work.
   process.on("uncaughtException", (err) => {
-    logger.error({ err }, "uncaught exception");
+    logger.fatal({ err }, "uncaught exception; shutting down");
+    void shutdown("uncaughtException");
   });
 
   /** Force-exit budget so a hung close() cannot wedge the process forever. */
@@ -128,6 +152,7 @@ async function main(): Promise<void> {
     logger.info({ signal }, "shutting down shipyard worker");
 
     const sequence = (async () => {
+      metricsServer?.close();
       await Promise.allSettled([
         deployWorker.close(),
         destroyWorker.close(),

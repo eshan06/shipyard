@@ -43,9 +43,29 @@ export function createOrchestrator(
     return new MockOrchestrator();
   }
 
+  const registryAuth =
+    config.REGISTRY_USERNAME && config.REGISTRY_PASSWORD
+      ? [
+          {
+            username: config.REGISTRY_USERNAME,
+            password: config.REGISTRY_PASSWORD,
+            ...(config.REGISTRY_SERVER ? { serveraddress: config.REGISTRY_SERVER } : {}),
+          },
+        ]
+      : undefined;
+
   logger.info(
-    { driver: "docker", dockerHost: config.DOCKER_HOST ?? "(default)" },
+    {
+      driver: "docker",
+      dockerHost: config.DOCKER_HOST ?? "(default)",
+      edgeNetwork: config.PREVIEW_EDGE_NETWORK ?? "(none)",
+      registryAuth: registryAuth ? "configured" : "(none)",
+    },
     "using docker orchestrator",
   );
-  return new DockerOrchestrator({ baseDomain: config.PREVIEW_BASE_DOMAIN });
+  return new DockerOrchestrator({
+    baseDomain: config.PREVIEW_BASE_DOMAIN,
+    ...(config.PREVIEW_EDGE_NETWORK ? { edgeNetworkName: config.PREVIEW_EDGE_NETWORK } : {}),
+    ...(registryAuth ? { registryAuth } : {}),
+  });
 }

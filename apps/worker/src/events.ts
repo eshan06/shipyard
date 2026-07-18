@@ -77,6 +77,11 @@ export interface EventPublisher {
    * global firehose. Does not write the `Preview` row (the caller owns that).
    */
   previewStatus(event: PreviewStatusEventInput): Promise<void>;
+  /**
+   * Drop the in-process seq counter for a finished deployment so the per-process
+   * map does not grow without bound. Safe to call more than once.
+   */
+  evictDeployment(deploymentId: string): void;
 }
 
 /** Construct-time dependencies for {@link createEventPublisher}. */
@@ -108,30 +113,46 @@ export function createEventPublisher(deps: EventPublisherDeps): EventPublisher {
    */
   const seqChainByDeployment = new Map<string, Promise<number>>();
 
+  /** Seed the next seq for a deployment from the current DB max (+1). */
+  function seedFromDb(deploymentId: string): Promise<number> {
+    return prisma.logChunk
+      .findFirst({
+        where: { deploymentId },
+        orderBy: { seq: "desc" },
+        select: { seq: true },
+      })
+      .then((last) => (last?.seq ?? -1) + 1);
+  }
+
   /**
    * Resolve the next `seq` for a deployment, continuing the DB max and
    * serializing concurrent callers via a per-deployment promise chain.
+   *
+   * On a transient failure (pool exhaustion during the lazy DB seed) the chain
+   * entry is DROPPED rather than resolved to 0 — otherwise every subsequent
+   * caller would also get 0 and collide on the `(deploymentId, seq)` unique
+   * constraint, silently dropping every later log row. Dropping it means the
+   * next call re-seeds cleanly from the DB max.
    */
   function nextSeq(deploymentId: string): Promise<number> {
-    const prior =
-      seqChainByDeployment.get(deploymentId) ??
-      // Seed lazily from the DB max on first use for this deployment.
-      prisma.logChunk
-        .findFirst({
-          where: { deploymentId },
-          orderBy: { seq: "desc" },
-          select: { seq: true },
-        })
-        .then((last) => (last?.seq ?? -1) + 1);
+    const prior = seqChainByDeployment.get(deploymentId) ?? seedFromDb(deploymentId);
 
-    // The next link returns the seq we just handed out + 1. Errors are absorbed
-    // so a transient DB failure during seeding does not poison the whole chain.
-    const next = prior.then(
+    const next: Promise<number> = prior.then(
       (seq) => seq + 1,
-      () => 0,
+      () => {
+        // The chain link failed: drop it (if it is still the current head) so
+        // the next call re-seeds from the DB max instead of everyone resolving
+        // to 0 and colliding on `(deploymentId, seq)`.
+        if (seqChainByDeployment.get(deploymentId) === next) {
+          seqChainByDeployment.delete(deploymentId);
+        }
+        // Re-seed this continuation so a follow-on caller chained to us still
+        // advances rather than restarting at 0.
+        return seedFromDb(deploymentId);
+      },
     );
     seqChainByDeployment.set(deploymentId, next);
-    return prior.catch(() => 0);
+    return prior.catch(() => seedFromDb(deploymentId));
   }
 
   /** Publish a JSON payload to a channel, logging (never throwing on) failures. */
@@ -203,6 +224,10 @@ export function createEventPublisher(deps: EventPublisherDeps): EventPublisher {
         status: event.status,
         at,
       });
+    },
+
+    evictDeployment(deploymentId: string): void {
+      seqChainByDeployment.delete(deploymentId);
     },
   };
 }

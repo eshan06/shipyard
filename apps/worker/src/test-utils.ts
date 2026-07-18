@@ -38,6 +38,7 @@ export interface FakeData {
   costRecords?: Row[];
   teams?: Row[];
   memberships?: Row[];
+  envVars?: Row[];
 }
 
 /** The fake Prisma + direct access to its backing tables for assertions. */
@@ -75,6 +76,9 @@ export function recordingEvents(): RecordingEvents {
     },
     async previewStatus(event: PreviewStatusEventInput): Promise<void> {
       statuses.push(event);
+    },
+    evictDeployment(_deploymentId: string): void {
+      /* no-op for tests */
     },
   };
 }
@@ -114,11 +118,45 @@ export function createFakePrisma(data: FakeData = {}): FakePrisma {
     costRecords: data.costRecords ?? [],
     teams: data.teams ?? [],
     memberships: data.memberships ?? [],
+    envVars: data.envVars ?? [],
   };
 
   /** Resolve a `where` clause to a single row (supports `{ id }` lookups). */
   const findById = (rows: Row[], where: { id?: string }): Row | undefined =>
     where.id != null ? rows.find((r) => r.id === where.id) : undefined;
+
+  /**
+   * Minimal Prisma-style `where` matcher covering the operators the workers use:
+   * scalar equality, `{ in }`, `{ notIn }`, `{ lt }`, and top-level `OR`.
+   */
+  const matchWhere = (row: Row, where: Record<string, unknown> | undefined): boolean => {
+    if (!where) return true;
+    for (const [key, cond] of Object.entries(where)) {
+      if (key === "OR" && Array.isArray(cond)) {
+        if (!cond.some((c) => matchWhere(row, c as Record<string, unknown>))) return false;
+        continue;
+      }
+      const value = row[key];
+      if (cond !== null && typeof cond === "object") {
+        const c = cond as Record<string, unknown>;
+        if ("in" in c && !(c.in as unknown[]).includes(value)) return false;
+        if ("notIn" in c && (c.notIn as unknown[]).includes(value)) return false;
+        if ("lt" in c) {
+          const a = value instanceof Date ? value.getTime() : (value as number);
+          const b = c.lt instanceof Date ? (c.lt as Date).getTime() : (c.lt as number);
+          if (!(a < b)) return false;
+        }
+        if ("gte" in c) {
+          const a = value instanceof Date ? value.getTime() : (value as number);
+          const b = c.gte instanceof Date ? (c.gte as Date).getTime() : (c.gte as number);
+          if (!(a >= b)) return false;
+        }
+      } else if (value !== cond) {
+        return false;
+      }
+    }
+    return true;
+  };
 
   const applySelect = (row: Row | undefined, args: { select?: Record<string, unknown> }): unknown => {
     if (!row) return null;
@@ -134,20 +172,56 @@ export function createFakePrisma(data: FakeData = {}): FakePrisma {
     deployment: {
       findUnique: async (args: { where: { id: string }; select?: Record<string, unknown> }) =>
         applySelect(findById(tables.deployments, args.where), args),
+      findFirst: async (args: {
+        where?: Record<string, unknown>;
+        orderBy?: { queuedAt?: "asc" | "desc" };
+        select?: Record<string, unknown>;
+      }) => {
+        const rows = tables.deployments.filter((r) => matchWhere(r, args.where));
+        if (args.orderBy?.queuedAt) {
+          rows.sort((a, b) => {
+            const av = (a.queuedAt as Date | undefined)?.getTime() ?? 0;
+            const bv = (b.queuedAt as Date | undefined)?.getTime() ?? 0;
+            return args.orderBy!.queuedAt === "desc" ? bv - av : av - bv;
+          });
+        }
+        return applySelect(rows[0], args ?? {});
+      },
       update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
         const row = findById(tables.deployments, args.where);
         if (row) Object.assign(row, args.data);
         return clone(row);
       },
+      updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        let count = 0;
+        for (const r of tables.deployments) {
+          if (matchWhere(r, args.where)) {
+            Object.assign(r, args.data);
+            count++;
+          }
+        }
+        return { count };
+      },
     },
     preview: {
       findUnique: async (args: { where: { id: string }; select?: Record<string, unknown> }) =>
         applySelect(findById(tables.previews, args.where), args),
-      findMany: async (_args?: unknown) => tables.previews.map(clone),
+      findMany: async (args?: { where?: Record<string, unknown>; select?: Record<string, unknown> }) =>
+        tables.previews.filter((r) => matchWhere(r, args?.where)).map(clone),
       update: async (args: { where: { id: string }; data: Record<string, unknown>; select?: Record<string, unknown> }) => {
         const row = findById(tables.previews, args.where);
         if (row) Object.assign(row, args.data);
         return applySelect(row, args ?? {});
+      },
+      updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
+        let count = 0;
+        for (const r of tables.previews) {
+          if (matchWhere(r, args.where)) {
+            Object.assign(r, args.data);
+            count++;
+          }
+        }
+        return { count };
       },
     },
     project: {
@@ -235,6 +309,15 @@ export function createFakePrisma(data: FakeData = {}): FakePrisma {
         tables.logChunks.push(row);
         return clone(row);
       },
+      deleteMany: async (args?: { where?: Record<string, unknown> }) => {
+        const before = tables.logChunks.length;
+        tables.logChunks = tables.logChunks.filter((r) => !matchWhere(r, args?.where));
+        return { count: before - tables.logChunks.length };
+      },
+    },
+    envVar: {
+      findMany: async (args?: { where?: Record<string, unknown>; select?: Record<string, unknown> }) =>
+        tables.envVars.filter((r) => matchWhere(r, args?.where)).map(clone),
     },
     user: {
       findFirst: async (args: { where: { githubLogin?: string }; select?: Record<string, unknown> }) => {
@@ -280,6 +363,11 @@ export function createFakePrisma(data: FakeData = {}): FakePrisma {
         const row: Row = { id: `cost-${tables.costRecords.length + 1}`, ...args.data };
         tables.costRecords.push(row);
         return clone(row);
+      },
+      deleteMany: async (args?: { where?: Record<string, unknown> }) => {
+        const before = tables.costRecords.length;
+        tables.costRecords = tables.costRecords.filter((r) => !matchWhere(r, args?.where));
+        return { count: before - tables.costRecords.length };
       },
       aggregate: async (_args?: unknown) => ({ _sum: { estimatedUsd: null } }),
     },

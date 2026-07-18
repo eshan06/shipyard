@@ -17,6 +17,8 @@ import {
   DEFAULT_JOB_OPTIONS,
   DestroyJobSchema,
   QUEUE,
+  destroyDedupId,
+  previewFromsFor,
   type DestroyReason,
 } from "@shipyard/core";
 
@@ -170,12 +172,14 @@ export async function runCleanupTick(
 
   for (const decision of decisions) {
     const payload = DestroyJobSchema.parse(decision);
-    // Deterministic jobId keyed by preview + reason so re-ticking the scheduler
-    // (which happens every CLEANUP_INTERVAL_MS while a preview is still RUNNING)
-    // does not stack redundant destroy jobs for the same preview.
+    // BullMQ deduplication (NOT a bare jobId): a deduplication key is released
+    // when the job leaves the queue, so re-ticking the scheduler collapses to
+    // one in-flight destroy without a retained completed/failed job silently
+    // swallowing later legitimate teardown requests. Shared id format with the
+    // API so the two producers actually de-dupe against each other.
     await deps.destroyQueue.add(QUEUE.destroy, payload, {
       ...DEFAULT_JOB_OPTIONS,
-      jobId: `destroy:${payload.previewId}:${payload.reason}`,
+      deduplication: { id: destroyDedupId(payload.previewId, payload.reason) },
     });
   }
 
@@ -192,7 +196,92 @@ export async function runCleanupTick(
       "cleanup tick: nothing to do",
     );
   }
+
+  // Reconcile stranded previews and prune old durable rows. These are
+  // best-effort side tasks — never let them abort the teardown scan.
+  try {
+    await reconcileStuckPreviews(deps, now);
+  } catch (err) {
+    deps.logger.warn({ err }, "cleanup tick: reconcile pass failed");
+  }
+  try {
+    await pruneRetention(deps, now);
+  } catch (err) {
+    deps.logger.warn({ err }, "cleanup tick: retention prune failed");
+  }
+
   return decisions;
+}
+
+/** Minutes in ms. */
+const MS_PER_DAY = 86_400_000;
+
+/**
+ * Recover previews stranded by a crashed/exhausted job: those stuck BUILDING or
+ * DEPLOYING past the deadline are failed; those stuck DESTROYING have a fresh
+ * terminal destroy re-enqueued. Without this a worker crash mid-deploy leaves a
+ * preview live-but-invisible forever (nothing else rescans those states).
+ */
+async function reconcileStuckPreviews(deps: CleanupWorkerDeps, now: Date): Promise<void> {
+  const deadline = new Date(now.getTime() - deps.config.STUCK_DEPLOY_MINUTES * MS_PER_MINUTE);
+
+  // Stuck mid-deploy → FAIL (CAS via the legal source states) so a real failure
+  // is visible and the preview can be redeployed.
+  const stuckDeploying = await deps.prisma.preview.findMany({
+    where: { status: { in: ["BUILDING", "DEPLOYING"] }, updatedAt: { lt: deadline } },
+    select: { id: true },
+  });
+  for (const p of stuckDeploying) {
+    await deps.prisma.preview.updateMany({
+      where: { id: p.id, status: { in: previewFromsFor("FAILED") } },
+      data: { status: "FAILED" },
+    });
+    // Reap any containers the stalled deploy left running.
+    await deps.destroyQueue.add(
+      QUEUE.destroy,
+      DestroyJobSchema.parse({ previewId: p.id, reason: "idle" }),
+      { ...DEFAULT_JOB_OPTIONS, deduplication: { id: destroyDedupId(p.id, "idle") } },
+    );
+  }
+
+  // Stuck DESTROYING → re-enqueue a terminal destroy to finish teardown.
+  const stuckDestroying = await deps.prisma.preview.findMany({
+    where: { status: "DESTROYING", updatedAt: { lt: deadline } },
+    select: { id: true },
+  });
+  for (const p of stuckDestroying) {
+    await deps.destroyQueue.add(
+      QUEUE.destroy,
+      DestroyJobSchema.parse({ previewId: p.id, reason: "manual" }),
+      { ...DEFAULT_JOB_OPTIONS, deduplication: { id: destroyDedupId(p.id, "manual") } },
+    );
+  }
+
+  if (stuckDeploying.length + stuckDestroying.length > 0) {
+    deps.logger.warn(
+      { failedStuck: stuckDeploying.length, requeuedDestroy: stuckDestroying.length },
+      "cleanup tick: reconciled stranded previews",
+    );
+  }
+}
+
+/**
+ * Prune durable rows that would otherwise grow without bound: log chunks and
+ * cost records older than their configured retention window. A retention of `0`
+ * disables that prune.
+ */
+async function pruneRetention(deps: CleanupWorkerDeps, now: Date): Promise<void> {
+  const { prisma: db, config } = deps;
+  if (config.LOG_RETENTION_DAYS > 0) {
+    const cutoff = new Date(now.getTime() - config.LOG_RETENTION_DAYS * MS_PER_DAY);
+    const res = await db.logChunk.deleteMany({ where: { timestamp: { lt: cutoff } } });
+    if (res.count > 0) deps.logger.info({ deleted: res.count }, "cleanup tick: pruned old log chunks");
+  }
+  if (config.COST_RETENTION_DAYS > 0) {
+    const cutoff = new Date(now.getTime() - config.COST_RETENTION_DAYS * MS_PER_DAY);
+    const res = await db.costRecord.deleteMany({ where: { periodEnd: { lt: cutoff } } });
+    if (res.count > 0) deps.logger.info({ deleted: res.count }, "cleanup tick: pruned old cost records");
+  }
 }
 
 /**

@@ -93,4 +93,15 @@ describe("processDestroyJob", () => {
       processDestroyJob({ previewId: "missing", reason: "manual" }, deps),
     ).resolves.toBeUndefined();
   });
+
+  it("skips an idle stop when the preview is mid-deploy (not RUNNING/DEGRADED)", async () => {
+    // An idle stop must not tear down containers underneath an in-flight deploy.
+    const { deps, tables, events } = buildDeps(seed("BUILDING"));
+    await processDestroyJob({ previewId: "prev-1", reason: "idle" }, deps);
+
+    // Left BUILDING; service rows untouched; nothing published.
+    expect(tables.previews[0]!.status).toBe("BUILDING");
+    expect(tables.services[0]!.status).toBe("HEALTHY");
+    expect(events.statuses).toHaveLength(0);
+  });
 });

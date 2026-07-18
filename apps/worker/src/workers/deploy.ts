@@ -25,13 +25,16 @@
  * @module
  */
 
-import { Worker, type Job } from "bullmq";
+import { Worker, type Job, type Queue } from "bullmq";
 
 import {
+  DEFAULT_JOB_OPTIONS,
   DeployJobSchema,
+  DestroyJobSchema,
   QUEUE,
-  canTransitionDeployment,
-  canTransitionPreview,
+  deploymentFromsFor,
+  destroyDedupId,
+  previewFromsFor,
   type DeployJob,
 } from "@shipyard/core";
 import {
@@ -45,7 +48,9 @@ import {
   type ServiceRuntime,
 } from "@shipyard/deploy-engine";
 
+import { checkoutRepo, type Checkout } from "../checkout.js";
 import { bullConnection, type WorkerConnection } from "../connection.js";
+import { resolvePreviewEnv } from "../secrets.js";
 
 import { logSourceForPhase, mapLogLevel } from "./log-mapping.js";
 import {
@@ -55,12 +60,21 @@ import {
 
 import type { WorkerConfig } from "../config.js";
 import type { EventPublisher } from "../events.js";
+import type { GitHubApp } from "../github.js";
 import type {
   DeploymentStatus,
   PrismaClient,
   PreviewStatus,
 } from "@shipyard/db";
 import type { Logger } from "pino";
+
+/** Per-attempt context so the worker knows when it is on its final BullMQ try. */
+export interface AttemptContext {
+  /** How many attempts have been made INCLUDING this one (BullMQ `attemptsMade + 1`). */
+  attempt: number;
+  /** The configured max attempts for the job. */
+  maxAttempts: number;
+}
 
 /** Dependencies injected into {@link processDeployJob} and the worker. */
 export interface DeployWorkerDeps {
@@ -74,6 +88,14 @@ export interface DeployWorkerDeps {
   config: WorkerConfig;
   /** Root logger; a child is derived per job. */
   logger: Logger;
+  /**
+   * The destroy queue — used by the final-failure finalizer to enqueue a
+   * teardown of a preview whose deploy exhausted its retries (otherwise its
+   * partially-started containers leak). Optional so unit tests can omit it.
+   */
+  destroyQueue?: Pick<Queue, "add">;
+  /** GitHub App client for private-repo checkout + PR status. Optional. */
+  githubApp?: GitHubApp | null;
 }
 
 /** Construct-time deps for {@link createDeployWorker} (adds the connection). */
@@ -91,6 +113,9 @@ interface LoadedProject {
   framework: string | null;
   rootDirectory: string;
   config: unknown;
+  provider: string;
+  repoFullName: string;
+  installationId: string | null;
 }
 
 /**
@@ -104,6 +129,7 @@ interface LoadedProject {
 export async function processDeployJob(
   job: DeployJob,
   deps: DeployWorkerDeps,
+  attempt: AttemptContext = { attempt: 1, maxAttempts: 1 },
 ): Promise<void> {
   const { prisma: db, orchestrator, events, config } = deps;
   const log = deps.logger.child({ job: "deploy", ...job });
@@ -128,6 +154,9 @@ export async function processDeployJob(
       framework: true,
       rootDirectory: true,
       config: true,
+      provider: true,
+      repoFullName: true,
+      installationId: true,
     },
   })) as LoadedProject | null;
   if (!project) {
@@ -135,16 +164,28 @@ export async function processDeployJob(
     return;
   }
 
+  // If the preview was torn down (PR closed/merged) while this deploy sat in the
+  // queue, do NOT resurrect it — cancel the deployment and stop. The RUNNING
+  // transition later is also CAS-guarded, but bailing here avoids wasted work.
+  if (preview.status === "DESTROYED" || preview.status === "DESTROYING") {
+    log.info({ status: preview.status }, "preview is being torn down; cancelling deploy");
+    await cancelDeployment(db, deployment.id);
+    return;
+  }
+
   const startedAt = new Date();
 
   // ── 1. Enter BUILDING + ensure Build row ───────────────────────────────────
-  await transitionDeployment(db, deployment.id, deployment.status, "BUILDING", {
-    startedAt,
-  });
-  await transitionPreview(db, events, preview.id, preview.status, "BUILDING", {
+  await transitionDeployment(db, deployment.id, "BUILDING", { startedAt });
+  const enteredBuilding = await transitionPreview(db, events, preview.id, "BUILDING", {
     projectId: project.id,
     teamId: project.teamId,
   });
+  if (!enteredBuilding && (await previewIsTerminal(db, preview.id))) {
+    log.info("preview reached a terminal state before build; cancelling deploy");
+    await cancelDeployment(db, deployment.id);
+    return;
+  }
   await db.build.upsert({
     where: { deploymentId: deployment.id },
     create: {
@@ -160,16 +201,41 @@ export async function processDeployJob(
     message: `Building preview ${preview.slug} @ ${job.commitSha.slice(0, 12)}`,
   });
 
-  // ── 2. Plan + deploy ───────────────────────────────────────────────────────
-  const plan = planFor(job, preview.slug, project);
-  const hooks = makeHooks(db, events, deployment.id, preview.id);
+  // Report PENDING status back onto the PR (best-effort; no-op without an app).
+  await postCommitStatus(deps, project, job.commitSha, "pending", undefined, "Building preview…");
 
+  // ── 2. Plan + deploy ───────────────────────────────────────────────────────
+  // Real (docker) builds need the PR source and the project's decrypted env;
+  // check the code out into an isolated scratch dir and resolve the build
+  // context against it. Cleaned up in the finally regardless of outcome.
+  let checkout: Checkout | undefined;
   let result: DeployResult;
   try {
+    const env = await resolvePreviewEnv(
+      db,
+      { projectId: project.id, previewId: preview.id, encryptionKey: config.SECRETS_ENCRYPTION_KEY },
+      log,
+    );
+    if (config.DEPLOY_DRIVER === "docker") {
+      checkout = await checkoutRepo(
+        {
+          repoFullName: project.repoFullName,
+          commitSha: job.commitSha,
+          rootDirectory: project.rootDirectory,
+          installationId: project.installationId,
+          workspaceDir: config.WORKSPACE_DIR,
+        },
+        deps.githubApp ?? null,
+        log,
+      );
+    }
+    const plan = planFor(job, preview.slug, project, { env, contextDir: checkout?.contextDir });
+    const hooks = makeHooks(db, events, deployment.id, preview.id);
+
     // The engine reports DEPLOYING-style progress via hooks; reflect it once the
     // network/containers are being created.
-    await transitionDeployment(db, deployment.id, "BUILDING", "DEPLOYING");
-    await transitionPreview(db, events, preview.id, "BUILDING", "DEPLOYING", {
+    await transitionDeployment(db, deployment.id, "DEPLOYING");
+    await transitionPreview(db, events, preview.id, "DEPLOYING", {
       projectId: project.id,
       teamId: project.teamId,
     });
@@ -180,10 +246,14 @@ export async function processDeployJob(
       previewId: preview.id,
       projectId: project.id,
       teamId: project.teamId,
+      commitSha: job.commitSha,
       startedAt,
       error,
+      attempt,
     });
     throw error;
+  } finally {
+    await checkout?.cleanup();
   }
 
   // Persist whatever services the engine reported, regardless of outcome.
@@ -196,9 +266,11 @@ export async function processDeployJob(
       previewId: preview.id,
       projectId: project.id,
       teamId: project.teamId,
+      commitSha: job.commitSha,
       startedAt,
       error: new Error(summary),
       durationMs: result.durationMs,
+      attempt,
     });
     return;
   }
@@ -220,16 +292,30 @@ export async function processDeployJob(
       durationMs,
     },
   });
-  await transitionDeployment(db, deployment.id, "DEPLOYING", "SUCCEEDED", {
+  await transitionDeployment(db, deployment.id, "SUCCEEDED", {
     finishedAt,
     durationMs,
   });
-  await transitionPreview(db, events, preview.id, "DEPLOYING", "RUNNING", {
+
+  // Supersession guard: if a newer deployment for this preview has since been
+  // enqueued (rapid PR pushes), do NOT flip the preview to RUNNING on this
+  // (older) commit — the newer deploy owns the preview's final state.
+  if (!(await isLatestDeployment(db, preview.id, deployment.id))) {
+    log.info("a newer deployment superseded this one; not claiming RUNNING");
+    return;
+  }
+
+  const nowRunning = await transitionPreview(db, events, preview.id, "RUNNING", {
     url,
     lastActivityAt: finishedAt,
     projectId: project.id,
     teamId: project.teamId,
   });
+  if (!nowRunning) {
+    log.info("preview left the deploy path before RUNNING; not overwriting its state");
+    return;
+  }
+  await postCommitStatus(deps, project, job.commitSha, "success", url, "Preview is live");
 
   await events.log({
     deploymentId: deployment.id,
@@ -237,6 +323,7 @@ export async function processDeployJob(
     message: `Preview ready at ${url}`,
   });
   await notifyPreviewReady(db, deps.logger, preview.id, url);
+  events.evictDeployment(deployment.id);
 }
 
 /**
@@ -251,7 +338,13 @@ export function createDeployWorker(deps: CreateDeployWorkerDeps): Worker {
     QUEUE.deploy,
     async (job: Job) => {
       const payload = DeployJobSchema.parse(job.data);
-      await processDeployJob(payload, deps);
+      // Thread BullMQ's attempt bookkeeping so the failure path can tell a
+      // retryable failure from the final one (finalize + notify only on the last).
+      const maxAttempts = job.opts.attempts ?? 1;
+      await processDeployJob(payload, deps, {
+        attempt: job.attemptsMade + 1,
+        maxAttempts,
+      });
     },
     {
       connection: bullConnection(connection),
@@ -291,29 +384,42 @@ function frameworkFrom(value: string | null): Framework | undefined {
     : undefined;
 }
 
+/** Extra plan inputs resolved at deploy time (decrypted env + checkout dir). */
+interface PlanOverrides {
+  /** Decrypted project/preview env vars to inject into every app service. */
+  env: Record<string, string>;
+  /** Absolute build-context directory from the checkout (docker mode only). */
+  contextDir?: string;
+}
+
 /** Build the {@link PreviewPlan} for a job from the project's stored config. */
 function planFor(
   job: DeployJob,
   slug: string,
   project: LoadedProject,
+  overrides: PlanOverrides,
 ): PreviewPlan {
   const planner = new ComposePlanner();
   return planner.plan({
     previewId: job.previewId,
     slug,
     projectId: project.id,
-    config: projectConfigFrom(project),
+    config: projectConfigFrom(project, overrides.contextDir),
     framework: frameworkFrom(project.framework),
+    env: overrides.env,
   });
 }
 
 /** Coerce a `Project.config` JSON blob into a planner {@link ProjectConfig}. */
-function projectConfigFrom(project: LoadedProject): ProjectConfig {
+function projectConfigFrom(project: LoadedProject, contextDir?: string): ProjectConfig {
   const raw =
     project.config && typeof project.config === "object"
       ? (project.config as Record<string, unknown>)
       : {};
-  const config: ProjectConfig = { rootDirectory: project.rootDirectory };
+  // With a real checkout, the build context is the absolute checkout path (+ the
+  // project's rootDirectory, already resolved in contextDir). Without one (mock
+  // driver) fall back to the stored rootDirectory.
+  const config: ProjectConfig = { rootDirectory: contextDir ?? project.rootDirectory };
   // `composeFile` is expected to be inline compose YAML *content*. Project
   // configs commonly store a file *path* (e.g. "infra/docker-compose.yml")
   // instead — in that case (and whenever we have no checked-out repo to read,
@@ -464,12 +570,19 @@ interface FailDeployInput {
   previewId: string;
   projectId: string;
   teamId: string;
+  commitSha: string;
   startedAt: Date;
   error: unknown;
   durationMs?: number;
+  attempt: AttemptContext;
 }
 
-/** Persist FAILED state across Build/Deployment/Preview + a BUILD_FAILED note. */
+/**
+ * Persist FAILED state across Build/Deployment/Preview. Notifications, PR status
+ * and the leaked-container teardown only fire on the FINAL attempt so retries
+ * don't spam the PR author or prematurely tear down a preview that may yet
+ * succeed on a later try.
+ */
 async function failDeploy(
   deps: DeployWorkerDeps,
   input: FailDeployInput,
@@ -479,42 +592,62 @@ async function failDeploy(
   const durationMs =
     input.durationMs ?? finishedAt.getTime() - input.startedAt.getTime();
   const summary = input.error instanceof Error ? input.error.message : String(input.error);
+  const isFinal = input.attempt.attempt >= input.attempt.maxAttempts;
 
   await db.build.updateMany({
     where: { deploymentId: input.deploymentId },
     data: { status: "FAILED", exitCode: 1, errorSummary: summary, finishedAt, durationMs },
   });
-  const deployment = await db.deployment.findUnique({
-    where: { id: input.deploymentId },
-    select: { status: true },
+  await transitionDeployment(db, input.deploymentId, "FAILED", {
+    finishedAt,
+    durationMs,
+    errorSummary: summary,
   });
-  if (deployment) {
-    await transitionDeployment(
-      db,
-      input.deploymentId,
-      deployment.status,
-      "FAILED",
-      { finishedAt, durationMs, errorSummary: summary },
-    );
-  }
-  const preview = await db.preview.findUnique({
-    where: { id: input.previewId },
-    select: { status: true },
-  });
-  if (preview) {
-    await transitionPreview(db, events, input.previewId, preview.status, "FAILED", {
-      projectId: input.projectId,
-      teamId: input.teamId,
-    });
-  }
 
   await events.log({
     deploymentId: input.deploymentId,
     source: "BUILD",
     level: "ERROR",
-    message: `Deploy failed: ${summary}`,
+    message: `Deploy failed${isFinal ? "" : ` (attempt ${input.attempt.attempt}/${input.attempt.maxAttempts}, will retry)`}: ${summary}`,
+  });
+
+  if (!isFinal) return;
+
+  // Final attempt: mark the preview FAILED, notify once, report to the PR, and
+  // tear down any containers the failed deploy left running (leak prevention).
+  await transitionPreview(db, events, input.previewId, "FAILED", {
+    projectId: input.projectId,
+    teamId: input.teamId,
   });
   await notifyBuildFailed(db, deps.logger, input.previewId, summary);
+  await enqueueDestroy(deps, input.previewId, "idle");
+  const project = await loadProjectForStatus(db, input.projectId);
+  if (project) {
+    await postCommitStatus(deps, project, input.commitSha, "failure", undefined, summary);
+  }
+  events.evictDeployment(input.deploymentId);
+}
+
+/**
+ * Enqueue a destroy job (best-effort). Used by the final-failure finalizer to
+ * reap containers a failed deploy left running. Deduplicated via BullMQ so a
+ * concurrent teardown is not double-scheduled.
+ */
+async function enqueueDestroy(
+  deps: DeployWorkerDeps,
+  previewId: string,
+  reason: "idle" | "manual",
+): Promise<void> {
+  if (!deps.destroyQueue) return;
+  try {
+    const payload = DestroyJobSchema.parse({ previewId, reason });
+    await deps.destroyQueue.add(QUEUE.destroy, payload, {
+      ...DEFAULT_JOB_OPTIONS,
+      deduplication: { id: destroyDedupId(previewId, reason) },
+    });
+  } catch (err) {
+    deps.logger.warn({ err, previewId }, "failed to enqueue cleanup destroy");
+  }
 }
 
 /** Options accepted by {@link transitionDeployment}. */
@@ -526,27 +659,33 @@ interface DeploymentUpdate {
 }
 
 /**
- * Guarded Deployment status write: only transitions when the core state machine
- * permits it, additionally applying any timing/error fields.
+ * Atomic Deployment status transition. Compare-and-swap: the write only lands
+ * when the row is in a state that can legally reach `to` (checked in the
+ * `WHERE`, not against a stale caller-supplied `from`). Returns whether it
+ * applied.
  */
 async function transitionDeployment(
   db: PrismaClient,
   deploymentId: string,
-  from: DeploymentStatus,
   to: DeploymentStatus,
   extra: DeploymentUpdate = {},
-): Promise<void> {
-  if (!canTransitionDeployment(from, to)) return;
-  await db.deployment.update({
-    where: { id: deploymentId },
+): Promise<boolean> {
+  const res = await db.deployment.updateMany({
+    where: { id: deploymentId, status: { in: deploymentFromsFor(to) } },
     data: {
-      ...(from === to ? {} : { status: to }),
+      status: to,
       ...(extra.startedAt ? { startedAt: extra.startedAt } : {}),
       ...(extra.finishedAt ? { finishedAt: extra.finishedAt } : {}),
       ...(extra.durationMs !== undefined ? { durationMs: extra.durationMs } : {}),
       ...(extra.errorSummary ? { errorSummary: extra.errorSummary } : {}),
     },
   });
+  return res.count > 0;
+}
+
+/** Move a deployment to CANCELLED (best-effort, CAS-guarded). */
+async function cancelDeployment(db: PrismaClient, deploymentId: string): Promise<void> {
+  await transitionDeployment(db, deploymentId, "CANCELLED", { finishedAt: new Date() });
 }
 
 /** Options accepted by {@link transitionPreview}. */
@@ -558,34 +697,106 @@ interface PreviewUpdate {
 }
 
 /**
- * Guarded Preview status write + status pub/sub. Only transitions when the core
- * state machine permits it; always publishes the (new or unchanged) status so
- * the dashboard stays live.
+ * Atomic Preview status transition + status pub/sub. Compare-and-swap keyed on
+ * the row's current status, so a preview that moved underneath us (e.g. was
+ * DESTROYED by a racing teardown) is NOT silently resurrected. Publishes the
+ * actual current status afterwards so the dashboard stays live either way.
+ * Returns whether the transition applied.
  */
 async function transitionPreview(
   db: PrismaClient,
   events: EventPublisher,
   previewId: string,
-  from: PreviewStatus,
   to: PreviewStatus,
   extra: PreviewUpdate = {},
-): Promise<void> {
-  if (!canTransitionPreview(from, to)) return;
-  const updated = await db.preview.update({
-    where: { id: previewId },
+): Promise<boolean> {
+  const res = await db.preview.updateMany({
+    where: { id: previewId, status: { in: previewFromsFor(to) } },
     data: {
-      ...(from === to ? {} : { status: to }),
+      status: to,
       ...(extra.url ? { url: extra.url } : {}),
       ...(extra.lastActivityAt ? { lastActivityAt: extra.lastActivityAt } : {}),
     },
+  });
+  const applied = res.count > 0;
+  const current = await db.preview.findUnique({
+    where: { id: previewId },
     select: { status: true, url: true },
   });
-  await events.previewStatus({
-    previewId,
-    status: updated.status,
-    url: updated.url,
-    projectId: extra.projectId,
-    teamId: extra.teamId,
+  if (current) {
+    await events.previewStatus({
+      previewId,
+      status: current.status,
+      url: current.url,
+      projectId: extra.projectId,
+      teamId: extra.teamId,
+    });
+  }
+  return applied;
+}
+
+/** Whether the preview is in a terminal (DESTROYED) or teardown state. */
+async function previewIsTerminal(db: PrismaClient, previewId: string): Promise<boolean> {
+  const p = await db.preview.findUnique({
+    where: { id: previewId },
+    select: { status: true },
+  });
+  return p?.status === "DESTROYED" || p?.status === "DESTROYING";
+}
+
+/** Whether `deploymentId` is the most recent deployment for the preview. */
+async function isLatestDeployment(
+  db: PrismaClient,
+  previewId: string,
+  deploymentId: string,
+): Promise<boolean> {
+  const latest = await db.deployment.findFirst({
+    where: { previewId },
+    orderBy: { queuedAt: "desc" },
+    select: { id: true },
+  });
+  // If we cannot determine the latest (e.g. the fake store lacks ordering),
+  // fail open — the CAS transition still protects terminal states.
+  return latest == null || latest.id === deploymentId;
+}
+
+/** Load the minimal project fields needed to report a commit status. */
+async function loadProjectForStatus(
+  db: PrismaClient,
+  projectId: string,
+): Promise<LoadedProject | null> {
+  return (await db.project.findUnique({
+    where: { id: projectId },
+    select: {
+      id: true,
+      teamId: true,
+      framework: true,
+      rootDirectory: true,
+      config: true,
+      provider: true,
+      repoFullName: true,
+      installationId: true,
+    },
+  })) as LoadedProject | null;
+}
+
+/** Post a commit status back to the PR head SHA when a GitHub App is configured. */
+async function postCommitStatus(
+  deps: DeployWorkerDeps,
+  project: LoadedProject,
+  sha: string,
+  state: "pending" | "success" | "failure" | "error",
+  targetUrl?: string,
+  description?: string,
+): Promise<void> {
+  if (!deps.githubApp || project.provider !== "GITHUB" || !project.installationId) return;
+  await deps.githubApp.postCommitStatus({
+    repoFullName: project.repoFullName,
+    installationId: project.installationId,
+    sha,
+    state,
+    targetUrl,
+    description,
   });
 }
 

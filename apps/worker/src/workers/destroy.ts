@@ -20,7 +20,7 @@ import { Worker, type Job } from "bullmq";
 import {
   DestroyJobSchema,
   QUEUE,
-  canTransitionPreview,
+  previewFromsFor,
   type DestroyJob,
   type DestroyReason,
 } from "@shipyard/core";
@@ -94,7 +94,10 @@ export async function processDestroyJob(
 
   if (terminal) {
     // Full teardown: RUNNING/… → DESTROYING → orchestrator.destroy → DESTROYED.
-    await transitionPreview(db, events, preview.id, preview.status, "DESTROYING", {
+    // The CAS to DESTROYING is idempotent across retries (DESTROYING can
+    // re-enter DESTROYING). If it can't apply and the preview is already
+    // DESTROYED, we've already handled it above.
+    await transitionPreview(db, events, preview.id, "DESTROYING", {
       projectId: preview.projectId,
       teamId,
     });
@@ -105,7 +108,7 @@ export async function processDestroyJob(
       throw error;
     }
     await stopServiceRows(db, preview.id);
-    await transitionPreview(db, events, preview.id, "DESTROYING", "DESTROYED", {
+    await transitionPreview(db, events, preview.id, "DESTROYED", {
       projectId: preview.projectId,
       teamId,
       destroyedAt: new Date(),
@@ -115,20 +118,27 @@ export async function processDestroyJob(
   }
 
   // Idle stop: park the preview at STOPPED (resumable) via orchestrator.stop.
-  // Note: the preview state machine forbids DESTROYING → STOPPED, so an idle
-  // stop intentionally does NOT pass through DESTROYING.
+  // Eligibility FIRST: only a live (RUNNING/DEGRADED) preview may be idle-stopped.
+  // Stopping a BUILDING/DEPLOYING preview would tear down containers underneath
+  // an in-flight deploy, then the STOPPED transition would be refused — leaving
+  // the row mid-deploy over stopped containers. Bail unless it's stoppable.
+  if (preview.status !== "RUNNING" && preview.status !== "DEGRADED") {
+    log.info({ status: preview.status }, "preview not in a stoppable state; skipping idle stop");
+    return;
+  }
   try {
     await orchestrator.stop(preview.id);
   } catch (error) {
     log.error({ err: error }, "orchestrator stop failed");
     throw error;
   }
-  await stopServiceRows(db, preview.id);
-  await transitionPreview(db, events, preview.id, preview.status, "STOPPED", {
+  const stopped = await transitionPreview(db, events, preview.id, "STOPPED", {
     projectId: preview.projectId,
     teamId,
   });
-  log.info({ reason: job.reason }, "preview stopped (idle)");
+  // Only reflect STOPPED on the service rows if the preview transition actually
+  // applied (it raced with something else otherwise).
+  if (stopped) await stopServiceRows(db, preview.id);
 }
 
 /**
@@ -194,30 +204,38 @@ interface PreviewUpdate {
 }
 
 /**
- * Guarded Preview status write + status pub/sub for the teardown path.
+ * Atomic Preview status transition (compare-and-swap) + status pub/sub for the
+ * teardown path. The write only lands when the row is in a state that can
+ * legally reach `to`; publishes the actual current status afterwards. Returns
+ * whether it applied.
  */
 async function transitionPreview(
   db: PrismaClient,
   events: EventPublisher,
   previewId: string,
-  from: PreviewStatus,
   to: PreviewStatus,
   extra: PreviewUpdate = {},
-): Promise<void> {
-  if (!canTransitionPreview(from, to)) return;
-  const updated = await db.preview.update({
-    where: { id: previewId },
+): Promise<boolean> {
+  const res = await db.preview.updateMany({
+    where: { id: previewId, status: { in: previewFromsFor(to) } },
     data: {
-      ...(from === to ? {} : { status: to }),
+      status: to,
       ...(extra.destroyedAt ? { destroyedAt: extra.destroyedAt } : {}),
     },
+  });
+  const applied = res.count > 0;
+  const current = await db.preview.findUnique({
+    where: { id: previewId },
     select: { status: true, url: true },
   });
-  await events.previewStatus({
-    previewId,
-    status: updated.status,
-    url: updated.url,
-    projectId: extra.projectId,
-    teamId: extra.teamId,
-  });
+  if (current) {
+    await events.previewStatus({
+      previewId,
+      status: current.status,
+      url: current.url,
+      projectId: extra.projectId,
+      teamId: extra.teamId,
+    });
+  }
+  return applied;
 }

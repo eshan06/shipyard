@@ -57,9 +57,41 @@ const ConfigSchema = z.object({
   DEPLOY_DRIVER: z.enum(["mock", "docker"]).default("mock"),
   /** Docker daemon endpoint; empty lets dockerode use its default. */
   DOCKER_HOST: z.string().optional(),
+  /**
+   * Shared edge/proxy Docker network the reverse proxy and each preview's
+   * ingress service attach to (see `infra/docker/preview-proxy.yml`). Empty
+   * disables proxy wiring (previews reachable only on the loopback host port).
+   */
+  PREVIEW_EDGE_NETWORK: z.string().optional(),
+  /**
+   * Scratch directory the deploy worker checks PR source out into before
+   * building. Each deploy uses an isolated sub-directory that is removed after.
+   */
+  WORKSPACE_DIR: z.string().optional(),
+
+  /** Optional private-registry credentials for base-image pulls/builds. */
+  REGISTRY_SERVER: z.string().optional(),
+  REGISTRY_USERNAME: z.string().optional(),
+  REGISTRY_PASSWORD: z.string().optional(),
+
+  // ── GitHub App (private-repo checkout + PR status) — optional ──────────────
+  /** GitHub App id (numeric). Enables installation-token auth when set. */
+  GITHUB_APP_ID: z.string().optional(),
+  /** GitHub App PEM private key (may contain literal `\n`). */
+  GITHUB_APP_PRIVATE_KEY: z.string().optional(),
 
   /** Wildcard DNS domain for preview URLs (`<slug>.<domain>`). */
   PREVIEW_BASE_DOMAIN: z.string().min(1, "PREVIEW_BASE_DOMAIN is required"),
+
+  /**
+   * Retention window (days) for durable per-deployment log rows and cost
+   * records. The cleanup tick prunes rows older than this so Postgres does not
+   * grow without bound. `0` disables pruning.
+   */
+  LOG_RETENTION_DAYS: z.coerce.number().int().min(0).default(14),
+  COST_RETENTION_DAYS: z.coerce.number().int().min(0).default(90),
+  /** Fail a preview stuck BUILDING/DEPLOYING longer than this (minutes). */
+  STUCK_DEPLOY_MINUTES: z.coerce.number().int().min(1).default(30),
   /**
    * Default idle window (minutes) after which a RUNNING preview is auto-stopped.
    * Used as a fallback when a preview/project does not specify its own.
@@ -70,6 +102,16 @@ const ConfigSchema = z.object({
    * destroyed. Used as a fallback when the project does not specify its own.
    */
   PREVIEW_DESTROY_TTL_MINUTES: z.coerce.number().int().min(1).default(60),
+
+  /** Expose a Prometheus `/metrics` HTTP endpoint. Defaults on. */
+  METRICS_ENABLED: z
+    .union([z.boolean(), z.string()])
+    .default(true)
+    .transform((v) =>
+      typeof v === "boolean" ? v : ["1", "true", "yes", "on"].includes(v.trim().toLowerCase()),
+    ),
+  /** Port the worker's metrics HTTP server binds to. */
+  METRICS_PORT: z.coerce.number().int().min(1).max(65_535).default(9090),
 
   /** Number of jobs the deploy/destroy workers process concurrently. */
   WORKER_CONCURRENCY: z.coerce.number().int().min(1).default(4),

@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { encryptSecret } from "@shipyard/core";
 import { MockOrchestrator } from "@shipyard/deploy-engine";
 
 import { loadConfig } from "../config.js";
@@ -14,6 +15,7 @@ import {
 import { processDeployJob, type DeployWorkerDeps } from "./deploy.js";
 
 import type { DeployJob } from "@shipyard/core";
+import type { PreviewPlan } from "@shipyard/deploy-engine";
 
 const config = loadConfig({
   DATABASE_URL: "postgres://x",
@@ -189,5 +191,97 @@ describe("processDeployJob (robustness)", () => {
     const { deps, tables } = buildDeps({ deployments: [], previews: [], projects: [] });
     await expect(processDeployJob(JOB, deps)).resolves.toBeUndefined();
     expect(tables.builds).toHaveLength(0);
+  });
+});
+
+describe("processDeployJob (concurrency + retry hardening)", () => {
+  it("does not resurrect a preview that was DESTROYED while the job was queued", async () => {
+    const data = seed();
+    (data.previews as Row[])[0]!.status = "DESTROYED";
+    const { deps, tables } = buildDeps(data);
+
+    await processDeployJob(JOB, deps);
+
+    // Preview stays terminal; the deployment is cancelled, never RUNNING.
+    expect(tables.previews[0]!.status).toBe("DESTROYED");
+    expect(tables.deployments[0]!.status).toBe("CANCELLED");
+    expect(tables.builds).toHaveLength(0);
+  });
+
+  it("does not claim RUNNING when a newer deployment has superseded this one", async () => {
+    const data = seed();
+    (data.deployments as Row[]).push({
+      id: "dep-2",
+      previewId: "prev-1",
+      status: "QUEUED",
+      commitSha: "newer",
+      queuedAt: new Date(Date.now() + 10_000),
+    });
+    (data.deployments as Row[])[0]!.queuedAt = new Date(Date.now() - 10_000);
+    const { deps, tables } = buildDeps(data);
+
+    await processDeployJob(JOB, deps);
+
+    // This (older) deploy still SUCCEEDs its build but must not own the preview.
+    expect(tables.deployments[0]!.status).toBe("SUCCEEDED");
+    expect(tables.previews[0]!.status).not.toBe("RUNNING");
+  });
+
+  it("injects decrypted project env vars into the preview plan", async () => {
+    const secret = encryptSecret("super-secret-value", config.SECRETS_ENCRYPTION_KEY);
+    const envVars: Row[] = [
+      {
+        id: "env-1",
+        projectId: "proj-1",
+        previewId: null,
+        key: "MY_API_KEY",
+        valueEncrypted: secret,
+        scope: "PROJECT",
+        target: "RUNTIME",
+      },
+    ];
+    let captured: PreviewPlan | undefined;
+    const orchestrator = new MockOrchestrator();
+    const origDeploy = orchestrator.deploy.bind(orchestrator);
+    vi.spyOn(orchestrator, "deploy").mockImplementation(async (plan, hooks) => {
+      captured = plan;
+      return origDeploy(plan, hooks);
+    });
+    const { deps } = buildDeps(seed({ envVars }), orchestrator);
+
+    await processDeployJob(JOB, deps);
+
+    const web = captured?.services.find((s) => s.name === "web");
+    expect(web?.env.MY_API_KEY).toBe("super-secret-value");
+  });
+
+  it("only finalizes (preview FAILED + notify + teardown) on the final attempt", async () => {
+    const orchestrator = new MockOrchestrator({ failServices: ["web"] });
+    const users: Row[] = [{ id: "user-1", githubLogin: "octocat" }];
+    const destroyAdds: unknown[] = [];
+    const { client, tables } = createFakePrisma(seed({ users }));
+    const events = recordingEvents();
+    const deps: DeployWorkerDeps = {
+      prisma: client,
+      orchestrator,
+      events,
+      config,
+      logger: testLogger(),
+      destroyQueue: { add: async (...args: unknown[]) => (destroyAdds.push(args), {} as never) },
+    };
+
+    // A non-final attempt: deployment FAILED, but preview NOT failed, no notify,
+    // no teardown — the retry may still succeed.
+    await processDeployJob(JOB, deps, { attempt: 1, maxAttempts: 3 });
+    expect(tables.deployments[0]!.status).toBe("FAILED");
+    expect(tables.previews[0]!.status).not.toBe("FAILED");
+    expect(tables.notifications.some((n) => n.type === "BUILD_FAILED")).toBe(false);
+    expect(destroyAdds).toHaveLength(0);
+
+    // The final attempt finalizes: preview FAILED, notified, teardown enqueued.
+    await processDeployJob(JOB, deps, { attempt: 3, maxAttempts: 3 });
+    expect(tables.previews[0]!.status).toBe("FAILED");
+    expect(tables.notifications.some((n) => n.type === "BUILD_FAILED")).toBe(true);
+    expect(destroyAdds).toHaveLength(1);
   });
 });

@@ -31,6 +31,11 @@ import type { Logger } from "pino";
 
 /** Seconds per millisecond divisor for ms → hours. */
 const MS_PER_HOUR = 3_600_000;
+/**
+ * Upper bound (in sampling intervals) on a single billed period, so a worker
+ * outage / long STOPPED gap is not charged in one lump at the current rate.
+ */
+const MAX_BILLABLE_INTERVALS = 2;
 /** Bytes per gigabyte (binary, matching container stats reporting). */
 const BYTES_PER_GB = 1024 ** 3;
 /** Plausible synthetic memory footprint per service, in GB. */
@@ -153,8 +158,16 @@ export async function runCostTick(
       });
       const periodStart =
         lastRecord?.periodEnd ?? new Date(now.getTime() - config.COST_INTERVAL_MS);
-      const periodMs = now.getTime() - periodStart.getTime();
-      if (periodMs <= 0) continue;
+      const rawPeriodMs = now.getTime() - periodStart.getTime();
+      if (rawPeriodMs <= 0) continue;
+      // Clamp the billed span so a worker outage or a long STOPPED→RUNNING gap
+      // isn't charged as if the preview ran the whole time (which would inflate
+      // spend and fire false BUDGET_EXCEEDED alerts). Cap at a few sampling
+      // intervals — the steady-state tick is always well under this.
+      const periodMs = Math.min(rawPeriodMs, MAX_BILLABLE_INTERVALS * config.COST_INTERVAL_MS);
+      // Keep the stored record self-consistent (periodEnd − periodStart == the
+      // billed span) when the raw gap was clamped.
+      const billedStart = new Date(now.getTime() - periodMs);
 
       const stats = await orchestrator.collectStats(preview.id).catch(() => []);
       const serviceCount = await db.service.count({
@@ -166,7 +179,7 @@ export async function runCostTick(
       await db.costRecord.create({
         data: {
           previewId: preview.id,
-          periodStart,
+          periodStart: billedStart,
           periodEnd: now,
           cpuSeconds: usage.cpuSeconds,
           memoryGbHours: usage.memoryGbHours,

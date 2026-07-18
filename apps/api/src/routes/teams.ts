@@ -34,6 +34,7 @@ import { Prisma } from "@shipyard/db";
 import { writeAudit } from "../lib/audit.js";
 import { paginate } from "../lib/pagination.js";
 import { callerTeamScope, requireTeamRole } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 import { toTeamDto } from "../lib/serialize.js";
 
 import {
@@ -57,6 +58,7 @@ export const teamsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/teams",
     {
+      preHandler: requireScope("teams:read"),
       schema: {
         tags: ["teams"],
         summary: "List teams the caller is a member of",
@@ -96,6 +98,7 @@ export const teamsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/teams",
     {
+      preHandler: requireScope("teams:write"),
       schema: {
         tags: ["teams"],
         summary: "Create a team (creator becomes OWNER)",
@@ -155,6 +158,7 @@ export const teamsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/teams/:id",
     {
+      preHandler: requireScope("teams:read"),
       schema: {
         tags: ["teams"],
         summary: "Get a team by id",
@@ -181,6 +185,7 @@ export const teamsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.patch(
     "/teams/:id",
     {
+      preHandler: requireScope("teams:write"),
       schema: {
         tags: ["teams"],
         summary: "Update a team",
@@ -240,6 +245,7 @@ export const teamsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.delete(
     "/teams/:id",
     {
+      preHandler: requireScope("teams:write"),
       schema: {
         tags: ["teams"],
         summary: "Delete a team",

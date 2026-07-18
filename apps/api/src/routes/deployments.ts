@@ -41,6 +41,7 @@ import {
   teamIdForDeployment,
   teamIdForPreview,
 } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 import { iso } from "../lib/serialize.js";
 
 import { ErrorResponseSchema, listResponse } from "./schemas.js";
@@ -231,6 +232,7 @@ export const deploymentsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/deployments",
     {
+      preHandler: requireScope("deployments:read"),
       schema: {
         tags: ["deployments"],
         summary: "List deployments the caller can see (paginated)",
@@ -318,6 +320,7 @@ export const deploymentsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/deployments/:id",
     {
+      preHandler: requireScope("deployments:read"),
       schema: {
         tags: ["deployments"],
         summary: "Get a deployment by id (incl. build and preview reference)",
@@ -354,6 +357,7 @@ export const deploymentsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/deployments/:id/cancel",
     {
+      preHandler: requireScope("deployments:write"),
       schema: {
         tags: ["deployments"],
         summary: "Cancel an in-flight deployment (and its build)",

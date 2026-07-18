@@ -20,6 +20,7 @@ import { z } from "zod";
 import { NotFoundError } from "@shipyard/core";
 
 import { requireTeamRole } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 
 import { BuildResponseSchema, toBuildDto } from "./deployments.js";
 import { ErrorResponseSchema } from "./schemas.js";
@@ -39,6 +40,7 @@ export const buildsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/builds/:id",
     {
+      preHandler: requireScope("deployments:read"),
       schema: {
         tags: ["builds"],
         summary: "Get a build by id (incl. error summary for failed builds)",

@@ -20,6 +20,7 @@ import { PaginationQuerySchema } from "@shipyard/core";
 
 import { paginate } from "../lib/pagination.js";
 import { requireTeamRole, teamIdForPreview } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 
 import { ReviewResponseSchema, toReviewDto } from "./reviews.serialize.js";
 import { ErrorResponseSchema, listResponse } from "./schemas.js";
@@ -39,6 +40,7 @@ export const reviewsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/previews/:id/reviews",
     {
+      preHandler: requireScope("previews:read"),
       schema: {
         tags: ["reviews"],
         summary: "List the PR reviews surfaced for a preview",

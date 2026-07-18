@@ -27,7 +27,8 @@ import {
   PullRequestStateSchema,
 } from "@shipyard/core";
 
-import { requireTeamRole, teamIdForProject } from "../lib/rbac.js";
+import { callerTeamScope, requireTeamRole, teamIdForProject } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 
 import {
   toPullRequestDto,
@@ -94,6 +95,7 @@ export const pullRequestsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/pull-requests",
     {
+      preHandler: requireScope("previews:read"),
       schema: {
         tags: ["pull-requests"],
         summary: "List tracked pull requests",
@@ -119,7 +121,13 @@ export const pullRequestsRoutes: FastifyPluginAsyncZod = async (app) => {
         await requireTeamRole(app, request, teamId, "VIEWER");
         where.projectId = projectId;
       } else {
-        where.project = { team: { members: { some: { userId } } } };
+        // A team-scoped API token may only see PRs under its own team; without
+        // this a token whose owner belongs to several teams would leak PR data
+        // across all of them (mirrors previews/projects/deployments lists).
+        const tokenTeamId = callerTeamScope(request);
+        where.project = tokenTeamId
+          ? { teamId: tokenTeamId, team: { members: { some: { userId } } } }
+          : { team: { members: { some: { userId } } } };
       }
       if (state !== undefined) where.state = state;
 
@@ -146,6 +154,7 @@ export const pullRequestsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/pull-requests/:id",
     {
+      preHandler: requireScope("previews:read"),
       schema: {
         tags: ["pull-requests"],
         summary: "Get a pull request by id",

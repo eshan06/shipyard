@@ -22,6 +22,7 @@ import { PaginationQuerySchema, roundUsd } from "@shipyard/core";
 
 import { paginate } from "../lib/pagination.js";
 import { callerTeamScope, requireTeamRole, teamIdForPreview } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 
 import {
   CostSummaryResponseSchema,
@@ -76,6 +77,7 @@ export const costsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/previews/:id/costs",
     {
+      preHandler: requireScope("previews:read"),
       schema: {
         tags: ["costs"],
         summary: "List a preview's cost records with a page total",
@@ -122,6 +124,7 @@ export const costsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/costs/summary",
     {
+      preHandler: requireScope("teams:read"),
       schema: {
         tags: ["costs"],
         summary:

@@ -50,6 +50,7 @@ import {
   teamIdForPreview,
   teamIdForProject,
 } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 
 import { ErrorResponseSchema, listResponse } from "./schemas.js";
 
@@ -143,6 +144,7 @@ export const envVarsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/projects/:id/env",
     {
+      preHandler: requireScope("env:read"),
       schema: {
         tags: ["env"],
         summary: "List a project's env vars (secrets masked)",
@@ -181,6 +183,7 @@ export const envVarsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/projects/:id/env",
     {
+      preHandler: requireScope("env:write"),
       schema: {
         tags: ["env"],
         summary: "Create a PROJECT-scoped env var",
@@ -246,6 +249,7 @@ export const envVarsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/previews/:id/env",
     {
+      preHandler: requireScope("env:read"),
       schema: {
         tags: ["env"],
         summary: "List a preview's env vars (secrets masked)",
@@ -284,6 +288,7 @@ export const envVarsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/previews/:id/env",
     {
+      preHandler: requireScope("env:write"),
       schema: {
         tags: ["env"],
         summary: "Create a PREVIEW-scoped env var",
@@ -348,6 +353,7 @@ export const envVarsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.patch(
     "/env/:id",
     {
+      preHandler: requireScope("env:write"),
       schema: {
         tags: ["env"],
         summary: "Update an env var (re-encrypts when a new value is supplied)",
@@ -428,6 +434,7 @@ export const envVarsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.delete(
     "/env/:id",
     {
+      preHandler: requireScope("env:write"),
       schema: {
         tags: ["env"],
         summary: "Delete an env var",

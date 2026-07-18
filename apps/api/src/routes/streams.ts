@@ -32,6 +32,7 @@ import {
   teamIdForPreview,
   requireTeamRole,
 } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 import { streamRedisChannel } from "../lib/sse.js";
 
 import { ErrorResponseSchema } from "./schemas.js";
@@ -94,6 +95,7 @@ export const streamsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/deployments/:id/logs",
     {
+      preHandler: requireScope("deployments:read"),
       schema: {
         tags: ["streams"],
         summary: "Stream a deployment's logs (SSE: backfill + live tail)",
@@ -128,6 +130,7 @@ export const streamsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/previews/:id/logs",
     {
+      preHandler: requireScope("previews:read"),
       schema: {
         tags: ["streams"],
         summary:
@@ -176,6 +179,7 @@ export const streamsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/previews/:id/status",
     {
+      preHandler: requireScope("previews:read"),
       schema: {
         tags: ["streams"],
         summary: "Stream a preview's status changes (SSE)",

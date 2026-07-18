@@ -26,6 +26,7 @@ import { registerErrorHandlers } from "./errors.js";
 import { buildLoggerOptions } from "./logger.js";
 import analyticsPlugin from "./plugins/analytics.js";
 import authPlugin from "./plugins/auth.js";
+import metricsPlugin from "./plugins/metrics.js";
 import prismaPlugin from "./plugins/prisma.js";
 import queuesPlugin from "./plugins/queues.js";
 import redisPlugin from "./plugins/redis.js";
@@ -72,7 +73,11 @@ export async function buildApp(
 
   const app = Fastify({
     logger: buildLoggerOptions(config),
-    trustProxy: true,
+    // Configurable so a production deploy behind a known proxy can pin the hop
+    // count / proxy subnet instead of blindly trusting X-Forwarded-For (which
+    // would let clients spoof their IP past the per-IP rate limiter). Defaults
+    // to `true` to preserve local/dev behaviour. See config.TRUST_PROXY.
+    trustProxy: config.TRUST_PROXY,
     disableRequestLogging: config.NODE_ENV === "test",
   }).withTypeProvider<ZodTypeProvider>();
 
@@ -84,9 +89,21 @@ export async function buildApp(
   app.decorate("config", config);
 
   // ── Security / transport middleware ───────────────────────────────────────
+  // Strict, API-appropriate CSP applied to EVERY response by default. The API
+  // serves JSON + SSE (never HTML that loads scripts/styles), so `default-src
+  // 'none'` with framing/base locked down is the safe baseline. The Swagger UI
+  // is the only surface that needs inline scripts/styles; the swagger plugin
+  // relaxes the CSP for the `/docs` subtree only (and only in non-production),
+  // so this strict policy is what production actually serves everywhere.
   await app.register(helmet, {
-    // The Swagger UI needs inline styles/scripts; relax CSP so /docs renders.
-    contentSecurityPolicy: false,
+    contentSecurityPolicy: {
+      useDefaults: false,
+      directives: {
+        "default-src": ["'none'"],
+        "base-uri": ["'none'"],
+        "frame-ancestors": ["'none'"],
+      },
+    },
   });
   await app.register(cors, {
     origin: config.PUBLIC_APP_URL,
@@ -119,6 +136,11 @@ export async function buildApp(
   });
 
   await app.register(swaggerPlugin);
+
+  // Prometheus /metrics (default process metrics + per-request HTTP histogram).
+  if (config.METRICS_ENABLED) {
+    await app.register(metricsPlugin);
+  }
 
   // ── Error handling + routes ───────────────────────────────────────────────
   registerErrorHandlers(app);

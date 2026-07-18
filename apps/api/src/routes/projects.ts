@@ -37,6 +37,7 @@ import { Prisma } from "@shipyard/db";
 import { writeAudit } from "../lib/audit.js";
 import { paginate } from "../lib/pagination.js";
 import { callerTeamScope, requireTeamRole, teamIdForProject } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 import { iso } from "../lib/serialize.js";
 
 import { ErrorResponseSchema, listResponse } from "./schemas.js";
@@ -125,6 +126,7 @@ export const projectsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/projects",
     {
+      preHandler: requireScope("projects:read"),
       schema: {
         tags: ["projects"],
         summary: "List projects across the caller's teams (optional teamId)",
@@ -176,6 +178,7 @@ export const projectsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/projects",
     {
+      preHandler: requireScope("projects:write"),
       schema: {
         tags: ["projects"],
         summary: "Create a project (requires ADMIN on the target team)",
@@ -251,6 +254,7 @@ export const projectsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/projects/:id",
     {
+      preHandler: requireScope("projects:read"),
       schema: {
         tags: ["projects"],
         summary: "Get a project by id",
@@ -279,6 +283,7 @@ export const projectsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.patch(
     "/projects/:id",
     {
+      preHandler: requireScope("projects:write"),
       schema: {
         tags: ["projects"],
         summary: "Update a project (supports archive via isArchived)",
@@ -362,6 +367,7 @@ export const projectsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.delete(
     "/projects/:id",
     {
+      preHandler: requireScope("projects:write"),
       schema: {
         tags: ["projects"],
         summary: "Delete a project",

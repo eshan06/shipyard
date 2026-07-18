@@ -21,6 +21,7 @@ import { z } from "zod";
 import { PaginationQuerySchema } from "@shipyard/core";
 
 import { callerTeamScope, requireTeamRole } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 
 import {
   toAuditLogDto,
@@ -63,6 +64,7 @@ export const auditRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/audit",
     {
+      preHandler: requireScope("teams:read"),
       schema: {
         tags: ["audit"],
         summary: "List audit-log entries for a team (or all the caller's teams)",

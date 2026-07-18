@@ -35,6 +35,7 @@ import {
 import { writeAudit } from "../lib/audit.js";
 import { paginate } from "../lib/pagination.js";
 import { requireTeamRole } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 import { generateApiToken } from "../lib/tokens.js";
 
 import { ErrorResponseSchema, listResponse } from "./schemas.js";
@@ -65,6 +66,7 @@ export const tokensRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/teams/:id/tokens",
     {
+      preHandler: requireScope("tokens:read"),
       schema: {
         tags: ["tokens"],
         summary: "List a team's active (non-revoked) API tokens",
@@ -102,6 +104,7 @@ export const tokensRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/teams/:id/tokens",
     {
+      preHandler: requireScope("tokens:write"),
       schema: {
         tags: ["tokens"],
         summary: "Create an API token (raw value returned exactly once)",
@@ -165,6 +168,7 @@ export const tokensRoutes: FastifyPluginAsyncZod = async (app) => {
   app.delete(
     "/teams/:id/tokens/:tokenId",
     {
+      preHandler: requireScope("tokens:write"),
       schema: {
         tags: ["tokens"],
         summary: "Revoke an API token",

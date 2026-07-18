@@ -35,6 +35,7 @@ import { Prisma } from "@shipyard/db";
 import { writeAudit } from "../lib/audit.js";
 import { paginate } from "../lib/pagination.js";
 import { requireTeamRole, teamIdForProject } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 
 import { ErrorResponseSchema, listResponse } from "./schemas.js";
 import {
@@ -60,6 +61,7 @@ export const seedsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/projects/:id/seeds",
     {
+      preHandler: requireScope("projects:read"),
       schema: {
         tags: ["seeds"],
         summary: "List a project's seed templates",
@@ -97,6 +99,7 @@ export const seedsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/projects/:id/seeds",
     {
+      preHandler: requireScope("projects:write"),
       schema: {
         tags: ["seeds"],
         summary: "Create a seed template",
@@ -170,6 +173,7 @@ export const seedsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.patch(
     "/seeds/:id",
     {
+      preHandler: requireScope("projects:write"),
       schema: {
         tags: ["seeds"],
         summary: "Update a seed template",
@@ -250,6 +254,7 @@ export const seedsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.delete(
     "/seeds/:id",
     {
+      preHandler: requireScope("projects:write"),
       schema: {
         tags: ["seeds"],
         summary: "Delete a seed template",

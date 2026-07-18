@@ -17,6 +17,7 @@ import {
   DeployJobSchema,
   DestroyJobSchema,
   QUEUE,
+  destroyDedupId,
 } from "@shipyard/core";
 
 import type { AppQueues } from "../types.js";
@@ -69,13 +70,13 @@ async function queuesPlugin(
     },
     async enqueueDestroy(payload: DestroyJob): Promise<string> {
       const data = DestroyJobSchema.parse(payload);
-      // Deterministic jobId keyed by preview + reason so repeated destroy
-      // enqueues for the same preview (e.g. the cleanup scheduler re-ticking
-      // while the preview is still RUNNING) do not stack redundant jobs.
+      // BullMQ deduplication (NOT a bare jobId): the dedup key is released when
+      // the job leaves the queue, so a later legitimate destroy for the same
+      // preview is not silently swallowed by a retained completed/failed job.
+      // Shared id format with the cleanup scheduler so both producers de-dupe.
       const job = await destroy.add(QUEUE.destroy, data, {
         ...DEFAULT_JOB_OPTIONS,
-        // NB: BullMQ forbids ":" in a custom jobId (its internal key separator).
-        jobId: `destroy-${data.previewId}-${data.reason}`,
+        deduplication: { id: destroyDedupId(data.previewId, data.reason) },
       });
       return String(job.id);
     },

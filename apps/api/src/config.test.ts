@@ -59,6 +59,19 @@ describe("loadConfig", () => {
     expect(() => loadConfig(env)).toThrow(/SESSION_SECRET/);
   });
 
+  it("defaults TRUST_PROXY to true and parses booleans/hops/subnets", () => {
+    expect(loadConfig(validEnv()).TRUST_PROXY).toBe(true);
+
+    const asFalse = loadConfig({ ...validEnv(), TRUST_PROXY: "false" });
+    expect(asFalse.TRUST_PROXY).toBe(false);
+
+    const asHops = loadConfig({ ...validEnv(), TRUST_PROXY: "1" });
+    expect(asHops.TRUST_PROXY).toBe(1);
+
+    const asSubnet = loadConfig({ ...validEnv(), TRUST_PROXY: "10.0.0.0/8" });
+    expect(asSubnet.TRUST_PROXY).toBe("10.0.0.0/8");
+  });
+
   it("rejects an invalid SECRETS_ENCRYPTION_KEY (wrong length)", () => {
     const env = validEnv();
     env.SECRETS_ENCRYPTION_KEY = Buffer.alloc(16).toString("base64");

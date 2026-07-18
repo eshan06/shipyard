@@ -50,6 +50,7 @@ import {
   teamIdForPreview,
   teamIdForProject,
 } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 
 import {
   PreviewDetailResponseSchema,
@@ -121,6 +122,7 @@ export const previewsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/previews",
     {
+      preHandler: requireScope("previews:read"),
       schema: {
         tags: ["previews"],
         summary: "List previews (filter by project/status; paginated)",
@@ -171,6 +173,7 @@ export const previewsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/previews/:id",
     {
+      preHandler: requireScope("previews:read"),
       schema: {
         tags: ["previews"],
         summary: "Get a preview by id",
@@ -202,6 +205,7 @@ export const previewsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/previews",
     {
+      preHandler: requireScope("previews:write"),
       schema: {
         tags: ["previews"],
         summary: "Create a manual preview and enqueue its first deploy",
@@ -317,6 +321,7 @@ export const previewsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.patch(
     "/previews/:id",
     {
+      preHandler: requireScope("previews:write"),
       schema: {
         tags: ["previews"],
         summary: "Update a preview's settings",
@@ -378,6 +383,7 @@ export const previewsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/previews/:id/redeploy",
     {
+      preHandler: requireScope("previews:write"),
       schema: {
         tags: ["previews"],
         summary: "Re-deploy a preview (new QUEUED deployment)",
@@ -443,6 +449,7 @@ export const previewsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/previews/:id/stop",
     {
+      preHandler: requireScope("previews:write"),
       schema: {
         tags: ["previews"],
         summary: "Stop a running preview (manual stop)",
@@ -495,6 +502,7 @@ export const previewsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/previews/:id/destroy",
     {
+      preHandler: requireScope("previews:write"),
       schema: {
         tags: ["previews"],
         summary: "Permanently destroy a preview",
@@ -548,6 +556,7 @@ export const previewsRoutes: FastifyPluginAsyncZod = async (app) => {
   app.post(
     "/previews/:id/pin",
     {
+      preHandler: requireScope("previews:write"),
       schema: {
         tags: ["previews"],
         summary: "Pin or unpin a preview (skips auto-stop/destroy when pinned)",

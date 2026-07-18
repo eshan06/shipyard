@@ -155,7 +155,9 @@ describe("teams routes", () => {
         id: "tok_1",
         userId: USER_ID,
         teamId: "team_bound",
-        scopes: [],
+        // teams:read satisfies the GET /teams scope gate; this test asserts
+        // team-confinement, not scope denial (see scopes.test.ts for that).
+        scopes: ["teams:read"],
         revokedAt: null,
         expiresAt: null,
       }));

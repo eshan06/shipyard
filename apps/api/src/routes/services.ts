@@ -21,6 +21,7 @@ import { PaginationQuerySchema } from "@shipyard/core";
 
 import { paginate } from "../lib/pagination.js";
 import { requireTeamRole, teamIdForPreview } from "../lib/rbac.js";
+import { requireScope } from "../lib/scopes.js";
 
 import { ErrorResponseSchema, listResponse } from "./schemas.js";
 import { ServiceResponseSchema, toServiceDto } from "./services.serialize.js";
@@ -40,6 +41,7 @@ export const servicesRoutes: FastifyPluginAsyncZod = async (app) => {
   app.get(
     "/previews/:id/services",
     {
+      preHandler: requireScope("previews:read"),
       schema: {
         tags: ["services"],
         summary: "List the services running inside a preview",

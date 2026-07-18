@@ -82,9 +82,40 @@ const ConfigSchema = z.object({
   /** Secret used to sign the session cookie / JWT and the cookie plugin. */
   SESSION_SECRET: z
     .string()
-    .min(16, "SESSION_SECRET must be at least 16 characters"),
+    .min(
+      32,
+      "SESSION_SECRET must be at least 32 characters (generate with `openssl rand -hex 32`)",
+    ),
   /** Dev convenience: enables password-less `POST /auth/dev-login`. */
   DEV_AUTH: BooleanFromEnv.default(false),
+
+  /**
+   * Whether/how much to trust `X-Forwarded-*` headers. Passed straight to
+   * Fastify's `trustProxy`. Accepts:
+   *  - a boolean word (`true`/`false`/`yes`/`no`/`on`/`off`) → boolean;
+   *  - a bare integer → the number of proxy hops to trust (e.g. `1`);
+   *  - any other non-empty string → a comma-separated IP/CIDR allowlist in
+   *    Fastify/proxy-addr syntax (e.g. `10.0.0.0/8,127.0.0.1`).
+   *
+   * Defaults to `true` to preserve out-of-the-box local/dev behaviour. In
+   * production behind a single known proxy, set the hop count (`1`) or the
+   * proxy's IP/subnet so clients cannot spoof `X-Forwarded-For` to defeat the
+   * per-IP rate limiter.
+   */
+  TRUST_PROXY: z
+    .union([z.boolean(), z.string()])
+    .default(true)
+    .transform((v): boolean | number | string => {
+      if (typeof v === "boolean") return v;
+      const trimmed = v.trim();
+      const lower = trimmed.toLowerCase();
+      if (["true", "yes", "on"].includes(lower)) return true;
+      if (["false", "no", "off"].includes(lower)) return false;
+      // A bare integer means "trust this many proxy hops".
+      if (/^\d+$/.test(trimmed)) return Number.parseInt(trimmed, 10);
+      // Otherwise treat it as an IP/subnet allowlist and pass it through.
+      return trimmed;
+    }),
 
   /** GitHub OAuth app client id (dashboard login). Optional. */
   GITHUB_OAUTH_CLIENT_ID: z.string().optional(),
@@ -97,6 +128,9 @@ const ConfigSchema = z.object({
   RATE_LIMIT_MAX: z.coerce.number().int().min(1).default(200),
   /** Rate-limit window (a `@fastify/rate-limit` duration string or ms number). */
   RATE_LIMIT_WINDOW: z.string().min(1).default("1 minute"),
+
+  /** Expose the Prometheus `GET /metrics` endpoint. Defaults on. */
+  METRICS_ENABLED: BooleanFromEnv.default(true),
 
   // ── Product analytics / telemetry ──────────────────────────────────────────
   /**

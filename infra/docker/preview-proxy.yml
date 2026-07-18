@@ -27,6 +27,13 @@
 # labels. The socket is root-equivalent — run this proxy on the preview host
 # only, isolated from the control-plane (api/worker/db) host, and never expose
 # the Traefik dashboard publicly (it is disabled here).
+#
+# NOTE (Docker Desktop on Windows/macOS): Traefik's docker provider may fail to
+# read the Docker socket through Desktop's socket proxy ("Failed to retrieve
+# information of the docker client"). This is a Docker Desktop limitation, not a
+# config error — the routing labels + edge network are correct and work on a
+# native Linux daemon. To exercise the proxy on Desktop, run it inside a Linux
+# VM/WSL2 with a native dockerd, or use a socket-proxy sidecar.
 # ──────────────────────────────────────────────────────────────────────────
 name: shipyard-preview-proxy
 

@@ -21,7 +21,20 @@
     },
     "test": {
       "dependsOn": ["^build"],
-      "outputs": ["coverage/**"]
+      "outputs": ["coverage/**"],
+      // Infra/config env the real-DB integration suites read. Turbo's strict
+      // env mode strips undeclared vars, which silently skipped those suites
+      // (locally AND in CI) even with Postgres provisioned. Declared in `env`
+      // (not passThroughEnv) so runs with/without a DB cache separately.
+      "env": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "SESSION_SECRET",
+        "SECRETS_ENCRYPTION_KEY",
+        "PUBLIC_APP_URL",
+        "PUBLIC_API_URL",
+        "PREVIEW_BASE_DOMAIN"
+      ]
     },
     "db:generate": {
       "cache": false

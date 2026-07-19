@@ -121,6 +121,15 @@ jobs:
     env:
       DATABASE_URL: postgresql://shipyard:shipyard@localhost:5432/shipyard_test
       REDIS_URL: redis://localhost:6379
+      # CI-only dummy config so `loadConfig` passes in the integration suite.
+      # NOT real secrets: this job never talks to anything outside the runner.
+      SESSION_SECRET: ci-only-session-secret-0123456789abcdef
+      # base64 of the 32-byte ASCII string "ci-only-dummy-key-0123456789abcd".
+      SECRETS_ENCRYPTION_KEY: Y2ktb25seS1kdW1teS1rZXktMDEyMzQ1Njc4OWFiY2Q=
+      # Required (no defaults) by the API config schema; values are inert here.
+      PUBLIC_APP_URL: http://localhost:3000
+      PUBLIC_API_URL: http://localhost:4000
+      PREVIEW_BASE_DOMAIN: preview.localhost
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -151,6 +160,17 @@ jobs:
 
       - name: Apply migrations (prisma migrate deploy)
         run: pnpm --filter @shipyard/db exec prisma migrate deploy
+
+      # prisma/seed.ts imports @shipyard/core, which resolves to its built
+      # dist/ — build the db package and its workspace deps before seeding
+      # (pnpm's `...` filter suffix includes dependencies).
+      - name: Build seed prerequisites
+        run: pnpm --filter @shipyard/db... build
+
+      # The integration suite asserts against the seeded dataset (previews,
+      # users, deployments) — an empty-but-migrated DB would fail it.
+      - name: Seed database
+        run: pnpm --filter @shipyard/db exec tsx prisma/seed.ts
 
       - name: Test
         run: pnpm test

@@ -1,11 +1,15 @@
 # Shipyard — Build Progress & Backlog
 
-**Status:** Phases 0–8 complete. The core-product path (real docker deploys) is
-implemented, hardened, and end-to-end verified; the agent-owned go-live track is
-done. Remaining items are provisioning/credentials (the `(you)` list below).
+**Status:** Phases 0–8 complete + the 2026-07-18/19 verification passes: clean
+prod build (7/7), the full stack run and driven from built artifacts (`next
+start` + `node dist`), live SSE status pipeline made truthful end-to-end, the
+real-DB integration suite un-skipped locally AND in CI, and deploy-artifact/env
+docs reconciled with the shipped code. Remaining items are
+provisioning/credentials (the `(you)` list below).
 **→ For the production roadmap and next steps, see [`docs/GO_LIVE.md`](docs/GO_LIVE.md)**
 (and [`docs/RESUME_PROMPT.md`](docs/RESUME_PROMPT.md) to resume).
-**Last updated:** 2026-07-17 (production-hardening session — see Phase 8 below).
+**Last updated:** 2026-07-19 (prod-build verification + SSE/reconciliation
+hardening + CI integration coverage + infra truth pass).
 
 ## Build note (for resuming agents)
 The working tree (`C:\Users\toesh\newGithub\shipyard`) now builds **natively on

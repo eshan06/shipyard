@@ -30,8 +30,22 @@ data:
   PUBLIC_APP_URL: "https://shipyard.example.com"
   PREVIEW_BASE_DOMAIN: "preview.shipyard.example.com"
   DEV_AUTH: "false"
+  # How much of X-Forwarded-* to trust (client IP for rate limiting / audit).
+  # In-cluster the API is only reachable through ingress-nginx (which sets XFF
+  # itself), so trusting one hop is correct. If pods can hit the API Service
+  # directly from untrusted workloads, tighten this to the ingress controller's
+  # pod CIDR (e.g. "10.244.0.0/16") so they cannot spoof X-Forwarded-For.
+  TRUST_PROXY: "1"
   RATE_LIMIT_MAX: "200"
   RATE_LIMIT_WINDOW: "1 minute"
+
+  # --- Observability ---
+  # /metrics on the API (main port) and the worker (dedicated :9090 server).
+  # NOTE: the worker's liveness probe targets /healthz on the SAME server
+  # (50-worker.yaml) — if you turn METRICS_ENABLED off, remove that probe too
+  # or the pod will crashloop. The public ingress denies /metrics (70-ingress).
+  METRICS_ENABLED: "true"
+  METRICS_PORT: "9090"
 
   # --- Worker ---
   DEPLOY_DRIVER: "mock" # set to "docker" only where the worker has a Docker daemon
@@ -46,6 +60,9 @@ data:
   COST_PER_GB_EGRESS: "0.09"
 
   # --- Web ---
-  # The browser hits the API same-origin via the Next rewrite; this destination
-  # is read at runtime. In-cluster, point it at the API Service.
+  # The browser talks to the API same-origin through the web app's catch-all
+  # Route Handler proxy (apps/web/src/app/api/v1/[...path]/route.ts), which
+  # resolves its upstream at RUNTIME as API_URL ?? NEXT_PUBLIC_API_URL.
+  # In-cluster, point it at the API Service.
+  API_URL: "http://shipyard-api:4000"
   NEXT_PUBLIC_API_URL: "http://shipyard-api:4000"

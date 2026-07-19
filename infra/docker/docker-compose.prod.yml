@@ -231,6 +231,14 @@ services:
       migrate:
         condition: service_completed_successfully
     networks: [shipyard]
+    # The worker's metrics server (METRICS_PORT, default 9090) also serves
+    # GET /healthz — restart a wedged worker. If you set METRICS_ENABLED=false,
+    # remove this healthcheck too (the server won't exist).
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:9090/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
     deploy:
       resources:
         limits:
@@ -250,12 +258,15 @@ services:
     environment:
       NODE_ENV: production
       PORT: 3000
-      # Read at RUNTIME by next.config.mjs rewrites — point the browser's
-      # same-origin /api/v1 proxy at the API service (in-network name `api`).
+      # The browser's same-origin /api/v1 calls are proxied by the web app's
+      # catch-all Route Handler, which resolves its upstream at RUNTIME as
+      # API_URL ?? NEXT_PUBLIC_API_URL — point it at the API service
+      # (in-network name `api`).
       # NOTE: any client-referenced NEXT_PUBLIC_* (e.g. NEXT_PUBLIC_DEPLOY_DRIVER,
       # NEXT_PUBLIC_DEV_AUTH, NEXT_PUBLIC_ANALYTICS_*) are inlined at image BUILD
       # time by `next build`, so those must be passed as Docker build-args, NOT
-      # set here. This runtime value only feeds the server-side rewrite target.
+      # set here. These runtime values only feed the server-side proxy target.
+      API_URL: ${API_URL:-http://api:4000}
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://api:4000}
     ports:
       - "${WEB_PORT:-3000}:3000"

@@ -1,14 +1,18 @@
 # ──────────────────────────────────────────────────────────────────────────
 # Shipyard worker — BullMQ consumers (deploy / destroy / cleanup / cost).
 #
-# Headless: no Service, no HTTP probes. BullMQ guarantees a job is processed by
+# No Service: nothing routes TO the worker. It does expose a small HTTP
+# server on METRICS_PORT (default 9090) serving Prometheus `GET /metrics`
+# and a `GET /healthz` liveness endpoint — used by the probes below and
+# scrape-annotated for Prometheus. BullMQ guarantees a job is processed by
 # exactly one worker, so scaling `replicas` and/or WORKER_CONCURRENCY simply
 # raises throughput safely — the repeatable cleanup/cost schedulers register on
-# a fixed jobId and de-duplicate. See docs/RUNBOOK.md (scaling).
+# a fixed jobId and de-duplicate. See docs/RUNBOOK.md (scaling, observability).
 #
-# DEPLOY_DRIVER=docker requires the worker to reach a Docker daemon (DOCKER_HOST,
-# or a mounted socket / DinD sidecar) — out of scope for this manifest; the
-# default is `mock` (set in the ConfigMap).
+# DEPLOY_DRIVER=docker requires the worker to reach a Docker daemon
+# (DOCKER_HOST, or a mounted socket / DinD sidecar) — provision that alongside
+# this manifest; the default is `mock` (set in the ConfigMap). The `workspace`
+# emptyDir below keeps PR checkouts working under readOnlyRootFilesystem.
 # ──────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
@@ -32,6 +36,10 @@ spec:
       labels:
         app.kubernetes.io/part-of: shipyard
         app.kubernetes.io/component: worker
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9090"
+        prometheus.io/path: /metrics
     spec:
       # Give in-flight deploy/destroy jobs time to finish on SIGTERM.
       terminationGracePeriodSeconds: 60
@@ -49,6 +57,23 @@ spec:
                 name: shipyard-config
             - secretRef:
                 name: shipyard-secrets
+          env:
+            # Writable scratch space for per-deploy PR checkouts (docker
+            # driver); pairs with the `workspace` emptyDir so checkouts work
+            # under readOnlyRootFilesystem.
+            - name: WORKSPACE_DIR
+              value: /workspace
+          ports:
+            - name: metrics
+              containerPort: 9090
+          # The metrics server also serves /healthz — restart a wedged worker.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: metrics
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            failureThreshold: 4
           resources:
             requests:
               cpu: "150m"
@@ -62,3 +87,9 @@ spec:
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      volumes:
+        - name: workspace
+          emptyDir: {}

@@ -70,19 +70,30 @@ Useful log signatures:
 
 ### Metrics
 
-There is **no Prometheus `/metrics` endpoint** in this build. Monitor via:
+Both services expose Prometheus metrics (prom-client), on by default
+(`METRICS_ENABLED=true`):
+
+- **API** — `GET /metrics` on the main API port (4000). Default Node process
+  metrics plus HTTP request counters/latency histograms labelled by
+  method/route/status. Unauthenticated + rate-limit-exempt **by design** for
+  internal scraping — the public ingress denies `/metrics`
+  (`infra/k8s/70-ingress.yaml`); keep it unreachable from the internet in any
+  other topology too.
+- **Worker** — a dedicated HTTP server on `METRICS_PORT` (default 9090) serving
+  `GET /metrics` (process + BullMQ job counters/durations per queue) and
+  `GET /healthz` (liveness — used by the k8s probe and the Compose
+  healthcheck). If you disable `METRICS_ENABLED`, remove those probes too.
+
+The k8s worker pod carries `prometheus.io/scrape` annotations; the API can be
+scraped via its Service. Alert on top of that with:
 
 1. **Health probes** — alert on `/readyz` flapping or non-200, and on pod restarts.
 2. **Logs** — alert on `level>=50` (error) lines, on `deploy job failed`
    frequency, and on the cost tick going silent (scheduler stalled).
-3. **Redis/BullMQ** — watch queue depth and failed-job counts (e.g.
-   `redis-cli`, `bull-board`, or a BullMQ exporter) for the `deploy`, `destroy`,
-   `cleanup`, `cost` queues; a growing `deploy` backlog means worker capacity is
-   short.
+3. **Queue metrics** — the worker's BullMQ counters (queue depth, failed jobs)
+   for the `deploy`, `destroy`, `cleanup`, `cost` queues; a growing `deploy`
+   backlog means worker capacity is short.
 4. **Postgres** — connection count, slow queries, disk.
-
-If you later need `/metrics`, add `prom-client` to the api/worker (out of scope
-for these deploy artifacts — would require an app code change).
 
 ---
 

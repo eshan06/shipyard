@@ -3,9 +3,10 @@
 #
 # Two hosts:
 #   shipyard.example.com      → web (dashboard). The browser calls the API
-#                               same-origin at /api/v1/*, which the Next server
-#                               rewrites to the in-cluster API Service — so no
-#                               public API host is strictly required for the UI.
+#                               same-origin at /api/v1/*, which the web app's
+#                               Route Handler proxy forwards to the in-cluster
+#                               API Service (API_URL) — so no public API host is
+#                               strictly required for the UI.
 #   api.shipyard.example.com  → api directly. Needed for inbound GitHub webhooks
 #                               (POST /api/v1/webhooks/github), the OpenAPI docs
 #                               (/docs), and external API/token clients. This is
@@ -28,6 +29,11 @@ metadata:
     # SSE (live logs) needs buffering off + long read timeouts on the API host.
     nginx.ingress.kubernetes.io/proxy-buffering: "off"
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    # /metrics is unauthenticated + rate-limit-exempt by design (Prometheus
+    # scrapes it over the pod network) — it must NOT be internet-reachable.
+    # If you use a non-nginx ingress class, replicate this deny there.
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location = /metrics { return 404; }
 spec:
   ingressClassName: nginx
   tls:

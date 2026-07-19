@@ -1,8 +1,10 @@
 # ──────────────────────────────────────────────────────────────────────────
 # Shipyard web — Next.js dashboard (`next start`). Deployment + Service.
-# NEXT_PUBLIC_API_URL is read at runtime by the Next rewrite, so the browser
-# talks to the API same-origin via /api/v1; in-cluster it resolves to the API
-# Service. A simple `GET /` liveness/readiness is sufficient (no DB deps).
+# The browser talks to the API same-origin via /api/v1, proxied by the web
+# app's catch-all Route Handler, which resolves its upstream at RUNTIME as
+# API_URL ?? NEXT_PUBLIC_API_URL — in-cluster both point at the API Service
+# (set in the ConfigMap). A simple `GET /` liveness/readiness is sufficient
+# (no DB deps).
 # ──────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment
@@ -33,7 +35,8 @@ spec:
           # Substitution point — see infra/k8s/README.md. OWNER → your GHCR
           # namespace; REPLACE_TAG → the immutable release tag CI pushed. NOTE the
           # web image bakes NEXT_PUBLIC_* at BUILD time (build-args), so the
-          # NEXT_PUBLIC_API_URL below only feeds the server-side Next rewrite.
+          # API_URL / NEXT_PUBLIC_API_URL runtime env below only feeds the
+          # server-side Route Handler proxy.
           image: ghcr.io/OWNER/shipyard-web:REPLACE_TAG
           # Safe with an IMMUTABLE tag: a fresh REPLACE_TAG is never cached on the
           # node, so it is always pulled on rollout. If you deploy a MUTABLE tag
@@ -47,6 +50,11 @@ spec:
               value: "production"
             - name: PORT
               value: "3000"
+            - name: API_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: shipyard-config
+                  key: API_URL
             - name: NEXT_PUBLIC_API_URL
               valueFrom:
                 configMapKeyRef:

@@ -96,7 +96,9 @@ kubectl -n shipyard create secret generic shipyard-secrets \
   --from-literal=SESSION_SECRET="$(openssl rand -hex 32)" \
   --from-literal=GITHUB_OAUTH_CLIENT_ID='' \
   --from-literal=GITHUB_OAUTH_CLIENT_SECRET='' \
-  --from-literal=GITHUB_WEBHOOK_SECRET=''
+  --from-literal=GITHUB_WEBHOOK_SECRET='' \
+  --from-literal=GITHUB_APP_ID='' \
+  --from-literal=GITHUB_APP_PRIVATE_KEY=''
 ```
 
 Set `GITHUB_WEBHOOK_SECRET` to the exact shared secret configured in your GitHub

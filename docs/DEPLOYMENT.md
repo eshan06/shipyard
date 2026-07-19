@@ -79,7 +79,7 @@ with a list of the offending variables. The full contract lives in
 
 | Var                                                   | Required | Notes                                  |
 | ----------------------------------------------------- | -------- | -------------------------------------- |
-| `SESSION_SECRET`                                      | yes      | ≥ 16 chars — `openssl rand -hex 32`    |
+| `SESSION_SECRET`                                      | yes      | ≥ 32 chars — `openssl rand -hex 32`    |
 | `PUBLIC_API_URL` / `PUBLIC_APP_URL`                   | yes      | public URLs (CORS + OAuth redirects)   |
 | `API_HOST` / `API_PORT`                               | no       | default `0.0.0.0` / `4000`             |
 | `DEV_AUTH`                                            | no       | **keep `false` in prod**               |
@@ -114,10 +114,12 @@ with a list of the offending variables. The full contract lives in
 > workflow and `apps/web/Dockerfile` wire `NEXT_PUBLIC_API_URL` and
 > `NEXT_PUBLIC_DEPLOY_DRIVER`).
 >
-> `NEXT_PUBLIC_API_URL` is the one value also read **at runtime** (server-side) by
-> `next.config.mjs` to set the same-origin `/api/v1/*` rewrite destination, so
-> Compose/k8s set it as a runtime env too. In-cluster, point it at the API
-> Service (`http://shipyard-api:4000`); with Compose, `http://api:4000`.
+> The same-origin `/api/v1/*` calls are proxied server-side by the web app's
+> catch-all Route Handler (`apps/web/src/app/api/v1/[...path]/route.ts`), which
+> resolves its upstream **at runtime** as `API_URL ?? NEXT_PUBLIC_API_URL`.
+> Compose/k8s therefore set `API_URL` (and `NEXT_PUBLIC_API_URL`) as runtime
+> env on the web container. In-cluster, point it at the API Service
+> (`http://shipyard-api:4000`); with Compose, `http://api:4000`.
 
 Never commit a real `.env`. `SECRETS_ENCRYPTION_KEY` encrypts env vars at rest
 (AES-256-GCM); losing or rotating it makes existing encrypted secrets
@@ -221,7 +223,9 @@ kubectl -n shipyard create secret generic shipyard-secrets \
   --from-literal=SESSION_SECRET="$(openssl rand -hex 32)" \
   --from-literal=GITHUB_OAUTH_CLIENT_ID='' \
   --from-literal=GITHUB_OAUTH_CLIENT_SECRET='' \
-  --from-literal=GITHUB_WEBHOOK_SECRET=''
+  --from-literal=GITHUB_WEBHOOK_SECRET='' \
+  --from-literal=GITHUB_APP_ID='' \
+  --from-literal=GITHUB_APP_PRIVATE_KEY=''
 #   `infra/k8s/20-secret.example.yaml` is a committed *template* showing the keys.
 #   It is named `*.example.yaml` on purpose so a directory apply
 #   (`kubectl apply -f infra/k8s/`) never applies it and clobbers this real

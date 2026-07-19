@@ -317,6 +317,37 @@ export default function PreviewDetailPage(): React.JSX.Element {
   const liveStatus = statusEvent?.status ?? preview?.status ?? "QUEUED";
   const liveUrl = statusEvent?.url ?? null;
 
+  // A live status event means the world changed behind the snapshot: a
+  // redeploy created a new Deployment row (the logs panel must switch to it)
+  // and service states moved (Starting → Healthy). Revalidate both so the
+  // page tracks reality without a manual refresh. Keyed on the EVENT OBJECT
+  // (a fresh object per SSE message), not the status string — consecutive
+  // events can carry the same status (e.g. RUNNING → redeploy → RUNNING)
+  // and must still retrigger.
+  const revalidateDeployments = deployments.mutate;
+  // The stream's first message is a prime (current status sent on connect),
+  // not a transition — SWR just fetched the same data, so skip it.
+  const primedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!statusEvent) return;
+    if (!primedRef.current) {
+      primedRef.current = true;
+      return;
+    }
+    void mutate();
+    void revalidateDeployments();
+    // Trailing settle: a fast deploy emits BUILDING→DEPLOYING→RUNNING within
+    // SWR's 2s dedupe window, so the immediate revalidations above can all
+    // join one in-flight fetch that captured a MID-deploy snapshot (stale
+    // services/updatedAt). Refetch once more after the burst quiets — the
+    // timer resets on every event so only the final transition pays it.
+    const settle = window.setTimeout(() => {
+      void mutate();
+      void revalidateDeployments();
+    }, 2_500);
+    return () => window.clearTimeout(settle);
+  }, [statusEvent, mutate, revalidateDeployments]);
+
   const latestDeploymentId = deployments.data?.data[0]?.id ?? null;
 
   if (error) {
@@ -345,7 +376,10 @@ export default function PreviewDetailPage(): React.JSX.Element {
         preview={preview}
         liveUrl={liveUrl}
         liveStatus={liveStatus}
-        onRefresh={() => void mutate()}
+        onRefresh={() => {
+          void mutate();
+          void revalidateDeployments();
+        }}
       />
 
       <div className="space-y-6">

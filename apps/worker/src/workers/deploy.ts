@@ -34,7 +34,6 @@ import {
   QUEUE,
   deploymentFromsFor,
   destroyDedupId,
-  previewFromsFor,
   type DeployJob,
 } from "@shipyard/core";
 import {
@@ -57,15 +56,12 @@ import {
   serviceStatusFromState,
   serviceTypeFromKind,
 } from "./mappers.js";
+import { transitionPreview } from "./transitions.js";
 
 import type { WorkerConfig } from "../config.js";
 import type { EventPublisher } from "../events.js";
 import type { GitHubApp } from "../github.js";
-import type {
-  DeploymentStatus,
-  PrismaClient,
-  PreviewStatus,
-} from "@shipyard/db";
+import type { DeploymentStatus, PrismaClient } from "@shipyard/db";
 import type { Logger } from "pino";
 
 /** Per-attempt context so the worker knows when it is on its final BullMQ try. */
@@ -141,6 +137,16 @@ export async function processDeployJob(
     log.warn("deployment row not found; dropping job");
     return;
   }
+  // A BullMQ retry can pick this job back up AFTER a newer deploy's
+  // cancelStaleSiblings (or a user cancel) already CANCELLED the row, or after
+  // it already SUCCEEDED — running the deploy anyway would waste work and its
+  // Build-row writes would contradict the recorded outcome. FAILED is NOT in
+  // this list: the failure path marks the row FAILED on every attempt, so a
+  // retry always arrives with a FAILED row and must still be allowed to run.
+  if (["SUCCEEDED", "CANCELLED"].includes(deployment.status as string)) {
+    log.info({ status: deployment.status }, "deployment already settled; dropping job");
+    return;
+  }
   const preview = await db.preview.findUnique({ where: { id: job.previewId } });
   if (!preview) {
     log.warn("preview row not found; dropping job");
@@ -172,6 +178,14 @@ export async function processDeployJob(
     await cancelDeployment(db, deployment.id);
     return;
   }
+
+  // Supersede stale siblings: any OTHER deployment of this preview still
+  // marked in-flight but enqueued BEFORE this one can never legitimately claim
+  // the preview (the newer deploy owns it) — crashed or abandoned runs would
+  // otherwise show as a forever-"Deploying" ghost in the dashboard. The CAS
+  // transition makes this safe against a sibling genuinely mid-run: its own
+  // later terminal write simply no-ops.
+  await cancelStaleSiblings(db, preview.id, deployment.id, deployment.queuedAt);
 
   const startedAt = new Date();
 
@@ -257,7 +271,12 @@ export async function processDeployJob(
   }
 
   // Persist whatever services the engine reported, regardless of outcome.
-  await persistServices(db, preview.id, result.services);
+  // Reconciliation (deleting rows not in OUR plan) is gated on still being the
+  // latest deployment: a slow, superseded deploy must not delete the Service
+  // rows its successor just wrote.
+  await persistServices(db, preview.id, result.services, {
+    reconcile: await isLatestDeployment(db, preview.id, deployment.id),
+  });
 
   if (result.status === "failed") {
     const summary = firstServiceError(result.services) ?? "deploy reported failed";
@@ -283,8 +302,11 @@ export async function processDeployJob(
   const durationMs = result.durationMs;
   const url = `https://${preview.slug}.${config.PREVIEW_BASE_DOMAIN}`;
 
-  await db.build.update({
-    where: { deploymentId: deployment.id },
+  // Guarded (not a plain update): a concurrent cancelStaleSiblings may have
+  // CANCELLED this build while we were deploying — only an in-flight build may
+  // claim SUCCEEDED, mirroring the deployment CAS below.
+  await db.build.updateMany({
+    where: { deploymentId: deployment.id, status: { in: ["PENDING", "RUNNING"] } },
     data: {
       status: "SUCCEEDED",
       imageTag: imageTagFor(result.services),
@@ -491,9 +513,20 @@ async function persistServices(
   db: PrismaClient,
   previewId: string,
   services: ServiceRuntime[],
+  options: { reconcile?: boolean } = {},
 ): Promise<void> {
   for (const runtime of services) {
     await upsertService(db, previewId, runtime);
+  }
+  // Reconcile: drop rows for services no longer in the plan (renamed stacks,
+  // stale fixtures) so the dashboard shows exactly the stack that runs now.
+  // Skipped when the engine reported nothing (a total failure must not erase
+  // the last known-good service list) and when the caller is a superseded
+  // deploy (only the latest deployment may prune its successor's rows).
+  if (services.length > 0 && options.reconcile) {
+    await db.service.deleteMany({
+      where: { previewId, name: { notIn: services.map((s) => s.name) } },
+    });
   }
 }
 
@@ -594,8 +627,10 @@ async function failDeploy(
   const summary = input.error instanceof Error ? input.error.message : String(input.error);
   const isFinal = input.attempt.attempt >= input.attempt.maxAttempts;
 
+  // Guarded like the success path: only an in-flight build may claim FAILED
+  // (a concurrent supersession may already have CANCELLED it).
   await db.build.updateMany({
-    where: { deploymentId: input.deploymentId },
+    where: { deploymentId: input.deploymentId, status: { in: ["PENDING", "RUNNING"] } },
     data: { status: "FAILED", exitCode: 1, errorSummary: summary, finishedAt, durationMs },
   });
   await transitionDeployment(db, input.deploymentId, "FAILED", {
@@ -691,52 +726,36 @@ async function cancelDeployment(db: PrismaClient, deploymentId: string): Promise
   await transitionDeployment(db, deploymentId, "CANCELLED", { finishedAt: new Date() });
 }
 
-/** Options accepted by {@link transitionPreview}. */
-interface PreviewUpdate {
-  url?: string;
-  lastActivityAt?: Date;
-  projectId?: string;
-  teamId?: string;
-}
-
 /**
- * Atomic Preview status transition + status pub/sub. Compare-and-swap keyed on
- * the row's current status, so a preview that moved underneath us (e.g. was
- * DESTROYED by a racing teardown) is NOT silently resurrected. Publishes the
- * actual current status afterwards so the dashboard stays live either way.
- * Returns whether the transition applied.
+ * Cancel every OTHER deployment of `previewId` that is still in a non-terminal
+ * state but was enqueued before `currentQueuedAt` (it has been superseded by
+ * the deployment now running). Also closes their in-flight Build rows so the
+ * builds view doesn't keep a phantom "Running" build.
  */
-async function transitionPreview(
+async function cancelStaleSiblings(
   db: PrismaClient,
-  events: EventPublisher,
   previewId: string,
-  to: PreviewStatus,
-  extra: PreviewUpdate = {},
-): Promise<boolean> {
-  const res = await db.preview.updateMany({
-    where: { id: previewId, status: { in: previewFromsFor(to) } },
-    data: {
-      status: to,
-      ...(extra.url ? { url: extra.url } : {}),
-      ...(extra.lastActivityAt ? { lastActivityAt: extra.lastActivityAt } : {}),
-    },
-  });
-  const applied = res.count > 0;
-  const current = await db.preview.findUnique({
-    where: { id: previewId },
-    select: { status: true, url: true },
-  });
-  if (current) {
-    await events.previewStatus({
+  currentDeploymentId: string,
+  currentQueuedAt: Date,
+): Promise<void> {
+  const stale = await db.deployment.findMany({
+    where: {
       previewId,
-      status: current.status,
-      url: current.url,
-      projectId: extra.projectId,
-      teamId: extra.teamId,
+      id: { not: currentDeploymentId },
+      status: { in: ["QUEUED", "BUILDING", "DEPLOYING"] },
+      queuedAt: { lt: currentQueuedAt },
+    },
+    select: { id: true },
+  });
+  for (const d of stale) {
+    await cancelDeployment(db, d.id);
+    await db.build.updateMany({
+      where: { deploymentId: d.id, status: { in: ["PENDING", "RUNNING"] } },
+      data: { status: "CANCELLED", finishedAt: new Date() },
     });
   }
-  return applied;
 }
+
 
 /** Whether the preview is in a terminal (DESTROYED) or teardown state. */
 async function previewIsTerminal(db: PrismaClient, previewId: string): Promise<boolean> {

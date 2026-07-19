@@ -127,7 +127,7 @@ export function createFakePrisma(data: FakeData = {}): FakePrisma {
 
   /**
    * Minimal Prisma-style `where` matcher covering the operators the workers use:
-   * scalar equality, `{ in }`, `{ notIn }`, `{ lt }`, and top-level `OR`.
+   * scalar equality, `{ in }`, `{ notIn }`, `{ not }`, `{ lt }`, and top-level `OR`.
    */
   const matchWhere = (row: Row, where: Record<string, unknown> | undefined): boolean => {
     if (!where) return true;
@@ -141,6 +141,7 @@ export function createFakePrisma(data: FakeData = {}): FakePrisma {
         const c = cond as Record<string, unknown>;
         if ("in" in c && !(c.in as unknown[]).includes(value)) return false;
         if ("notIn" in c && (c.notIn as unknown[]).includes(value)) return false;
+        if ("not" in c && value === c.not) return false;
         if ("lt" in c) {
           const a = value instanceof Date ? value.getTime() : (value as number);
           const b = c.lt instanceof Date ? (c.lt as Date).getTime() : (c.lt as number);
@@ -172,6 +173,8 @@ export function createFakePrisma(data: FakeData = {}): FakePrisma {
     deployment: {
       findUnique: async (args: { where: { id: string }; select?: Record<string, unknown> }) =>
         applySelect(findById(tables.deployments, args.where), args),
+      findMany: async (args?: { where?: Record<string, unknown>; select?: Record<string, unknown> }) =>
+        tables.deployments.filter((r) => matchWhere(r, args?.where)).map(clone),
       findFirst: async (args: {
         where?: Record<string, unknown>;
         orderBy?: { queuedAt?: "asc" | "desc" };
@@ -248,10 +251,10 @@ export function createFakePrisma(data: FakeData = {}): FakePrisma {
         if (row) Object.assign(row, args.data);
         return clone(row);
       },
-      updateMany: async (args: { where: { deploymentId: string }; data: Record<string, unknown> }) => {
+      updateMany: async (args: { where: Record<string, unknown>; data: Record<string, unknown> }) => {
         let count = 0;
         for (const b of tables.builds) {
-          if (b.deploymentId === args.where.deploymentId) {
+          if (matchWhere(b, args.where)) {
             Object.assign(b, args.data);
             count++;
           }
@@ -293,6 +296,11 @@ export function createFakePrisma(data: FakeData = {}): FakePrisma {
             s.previewId === args.where.previewId &&
             (args.where.status === undefined || s.status === args.where.status),
         ).length,
+      deleteMany: async (args?: { where?: Record<string, unknown> }) => {
+        const before = tables.services.length;
+        tables.services = tables.services.filter((r) => !matchWhere(r, args?.where));
+        return { count: before - tables.services.length };
+      },
     },
     logChunk: {
       findFirst: async (args: {

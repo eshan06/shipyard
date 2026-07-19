@@ -117,3 +117,28 @@ describe("processDestroyJob", () => {
     expect(events.statuses).toHaveLength(0);
   });
 });
+
+describe("processDestroyJob (URL + event consistency)", () => {
+  it("clears the preview URL on idle stop and publishes url:null", async () => {
+    const { deps, tables, events } = buildDeps(seed());
+    const job: DestroyJob = { previewId: "prev-1", reason: "idle" };
+
+    await processDestroyJob(job, deps);
+
+    // Row and event agree: a stopped preview has no live URL.
+    expect(tables.previews[0]!.url).toBeNull();
+    const stopped = events.statuses.find((s) => s.status === "STOPPED");
+    expect(stopped).toBeTruthy();
+    expect(stopped!.url ?? null).toBeNull();
+  });
+
+  it("clears the preview URL on terminal destroy", async () => {
+    const { deps, tables } = buildDeps(seed());
+    const job: DestroyJob = { previewId: "prev-1", reason: "pr_closed" };
+
+    await processDestroyJob(job, deps);
+
+    expect(tables.previews[0]!.status).toBe("DESTROYED");
+    expect(tables.previews[0]!.url).toBeNull();
+  });
+});

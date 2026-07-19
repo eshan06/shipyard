@@ -285,3 +285,94 @@ describe("processDeployJob (concurrency + retry hardening)", () => {
     expect(destroyAdds).toHaveLength(1);
   });
 });
+
+describe("processDeployJob (state reconciliation)", () => {
+  it("cancels stale in-flight sibling deployments (and their builds) at job start", async () => {
+    const data = seed();
+    data.deployments![0]!.queuedAt = new Date("2026-01-02T00:00:00Z");
+    data.deployments!.push({
+      id: "dep-0",
+      previewId: "prev-1",
+      status: "DEPLOYING",
+      commitSha: "0ldc0mmit",
+      queuedAt: new Date("2026-01-01T00:00:00Z"),
+    });
+    data.builds = [{ id: "b-0", deploymentId: "dep-0", status: "RUNNING" }];
+    const { deps, tables } = buildDeps(data);
+
+    await processDeployJob(JOB, deps);
+
+    // The abandoned sibling and its build are closed out…
+    expect(tables.deployments.find((d) => d.id === "dep-0")!.status).toBe("CANCELLED");
+    expect(tables.builds.find((b) => b.deploymentId === "dep-0")!.status).toBe("CANCELLED");
+    // …while the current deployment completes normally.
+    expect(tables.deployments.find((d) => d.id === "dep-1")!.status).toBe("SUCCEEDED");
+  });
+
+  it("does not cancel a newer in-flight sibling (rapid-push supersession)", async () => {
+    const data = seed();
+    data.deployments![0]!.queuedAt = new Date("2026-01-01T00:00:00Z");
+    data.deployments!.push({
+      id: "dep-2",
+      previewId: "prev-1",
+      status: "QUEUED",
+      commitSha: "newerc0mmit",
+      queuedAt: new Date("2026-01-02T00:00:00Z"),
+    });
+    const { deps, tables } = buildDeps(data);
+
+    await processDeployJob(JOB, deps);
+
+    expect(tables.deployments.find((d) => d.id === "dep-2")!.status).toBe("QUEUED");
+  });
+
+  it("removes Service rows no longer part of the deployed stack, scoped to the preview", async () => {
+    const data = seed();
+    data.services = [
+      { id: "svc-old", previewId: "prev-1", name: "legacy-db", status: "STARTING" },
+      { id: "svc-other", previewId: "prev-2", name: "api", status: "HEALTHY" },
+    ];
+    const { deps, tables } = buildDeps(data);
+
+    await processDeployJob(JOB, deps);
+
+    const names = tables.services
+      .filter((s) => s.previewId === "prev-1")
+      .map((s) => s.name)
+      .sort();
+    expect(names).toEqual(["api", "web"]);
+    // Other previews' rows are untouched by the reconciliation.
+    expect(tables.services.some((s) => s.id === "svc-other")).toBe(true);
+  });
+});
+
+describe("transitionPreview event semantics", () => {
+  it("publishes the CURRENT status (not the target) when a transition cannot apply", async () => {
+    // A STOPPED preview cannot legally enter BUILDING (fromsFor(BUILDING) is
+    // QUEUED + self), so the BUILDING attempt must publish the actual current
+    // status — the fallback branch — before later legal transitions proceed.
+    const data = seed();
+    data.previews![0]!.status = "STOPPED";
+    const { deps, events } = buildDeps(data);
+
+    await processDeployJob(JOB, deps);
+
+    const statuses = events.statuses.map((s) => s.status);
+    // Fallback publish of the refused BUILDING transition:
+    expect(statuses[0]).toBe("STOPPED");
+    // The deploy still completes via STOPPED → DEPLOYING → RUNNING.
+    expect(statuses).toContain("DEPLOYING");
+    expect(statuses).toContain("RUNNING");
+  });
+
+  it("publishes the applied target status on each successful transition", async () => {
+    const { deps, events } = buildDeps(seed());
+
+    await processDeployJob(JOB, deps);
+
+    // QUEUED preview: BUILDING and DEPLOYING both apply and are published as
+    // written (no re-read race can misreport them), then RUNNING with the URL.
+    const statuses = events.statuses.map((s) => s.status);
+    expect(statuses).toEqual(["BUILDING", "DEPLOYING", "RUNNING"]);
+  });
+});

@@ -20,17 +20,17 @@ import { Worker, type Job } from "bullmq";
 import {
   DestroyJobSchema,
   QUEUE,
-  previewFromsFor,
   type DestroyJob,
   type DestroyReason,
 } from "@shipyard/core";
 
-
 import { bullConnection, type WorkerConnection } from "../connection.js";
+
+import { transitionPreview } from "./transitions.js";
 
 import type { WorkerConfig } from "../config.js";
 import type { EventPublisher } from "../events.js";
-import type { PrismaClient, PreviewStatus } from "@shipyard/db";
+import type { PrismaClient } from "@shipyard/db";
 import type { PreviewOrchestrator } from "@shipyard/deploy-engine";
 import type { Logger } from "pino";
 
@@ -116,6 +116,7 @@ export async function processDestroyJob(
     await transitionPreview(db, events, preview.id, "DESTROYING", {
       projectId: preview.projectId,
       teamId,
+      url: null,
     });
     try {
       await orchestrator.destroy(preview.id);
@@ -128,6 +129,7 @@ export async function processDestroyJob(
       projectId: preview.projectId,
       teamId,
       destroyedAt: new Date(),
+      url: null,
     });
     log.info({ reason: job.reason }, "preview destroyed");
     return;
@@ -148,9 +150,12 @@ export async function processDestroyJob(
     log.error({ err: error }, "orchestrator stop failed");
     throw error;
   }
+  // url: null — a stopped preview's containers are gone, so its URL is dead;
+  // clearing the row keeps REST reads consistent with the published event.
   const stopped = await transitionPreview(db, events, preview.id, "STOPPED", {
     projectId: preview.projectId,
     teamId,
+    url: null,
   });
   // Only reflect STOPPED on the service rows if the preview transition actually
   // applied (it raced with something else otherwise).
@@ -212,46 +217,3 @@ async function teamIdForProject(
   return project?.teamId;
 }
 
-/** Options accepted by {@link transitionPreview}. */
-interface PreviewUpdate {
-  projectId?: string;
-  teamId?: string;
-  destroyedAt?: Date;
-}
-
-/**
- * Atomic Preview status transition (compare-and-swap) + status pub/sub for the
- * teardown path. The write only lands when the row is in a state that can
- * legally reach `to`; publishes the actual current status afterwards. Returns
- * whether it applied.
- */
-async function transitionPreview(
-  db: PrismaClient,
-  events: EventPublisher,
-  previewId: string,
-  to: PreviewStatus,
-  extra: PreviewUpdate = {},
-): Promise<boolean> {
-  const res = await db.preview.updateMany({
-    where: { id: previewId, status: { in: previewFromsFor(to) } },
-    data: {
-      status: to,
-      ...(extra.destroyedAt ? { destroyedAt: extra.destroyedAt } : {}),
-    },
-  });
-  const applied = res.count > 0;
-  const current = await db.preview.findUnique({
-    where: { id: previewId },
-    select: { status: true, url: true },
-  });
-  if (current) {
-    await events.previewStatus({
-      previewId,
-      status: current.status,
-      url: current.url,
-      projectId: extra.projectId,
-      teamId: extra.teamId,
-    });
-  }
-  return applied;
-}

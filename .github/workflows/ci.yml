@@ -60,6 +60,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # lint depends (via turbo ^build) on building workspace packages, and
+      # @shipyard/db's build compiles against the generated Prisma client.
+      - name: Generate Prisma Client
+        run: pnpm db:generate
+
       - name: Lint
         run: pnpm lint
 

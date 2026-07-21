@@ -1,5 +1,7 @@
 # ⚓ Shipyard
 
+[![CI](https://github.com/eshan06/shipyard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eshan06/shipyard/actions/workflows/ci.yml)
+
 **Preview environments manager for full-stack teams.**
 
 Every time a developer opens a pull request, Shipyard spins up a temporary, live
@@ -21,6 +23,28 @@ backend services, seeded data, and cleanup automation.
 - 📊 **Dashboard** — active previews, deploy status, live logs, costs, reviewers,
   and failed builds at a glance
 - 💸 **Cost tracking** — per-preview usage rolled up to dollars, with budgets
+
+## Engineering highlights
+
+- **Typed monorepo** — TypeScript end-to-end (Next.js 15, Fastify, BullMQ,
+  Prisma), shared zod contracts + status state machines in `packages/core`,
+  orchestrated with Turborepo + pnpm workspaces.
+- **Real-time pipeline** — deploy progress fans out worker → Redis pub/sub →
+  SSE → dashboard; log streaming with backfill + live tail; compare-and-swap
+  status transitions so concurrent deploys/teardowns can't corrupt state.
+- **Hardened container orchestration** — the Docker driver runs untrusted PR
+  code with resource limits (memory/CPU/pids), dropped capabilities,
+  `no-new-privileges`, read-only rootfs, and per-preview network isolation,
+  behind a Traefik reverse proxy for wildcard `<slug>.<domain>` routing.
+- **Security** — AES-256-GCM encrypted secrets at rest, HMAC-verified webhooks,
+  RBAC with team-scoped API tokens, strict CSP, rate limiting, session JWTs.
+  See [`SECURITY.md`](./SECURITY.md).
+- **Operations** — Prometheus `/metrics` on API + worker, health/readiness
+  probes, structured logs, seeded demo data, idle-preview reaping, cost
+  tracking, stuck-state reconciliation; Docker Compose + Kubernetes manifests
+  and a release pipeline that builds + pushes images.
+- **Tested** — 200+ vitest tests including a real-database integration suite
+  that runs in CI against migrated + seeded Postgres.
 
 ## Monorepo layout
 
@@ -60,17 +84,20 @@ pnpm infra:up                   # postgres + redis via docker compose
 cp .env.example .env
 ```
 
-Generate the two required secrets and put them in `.env`:
+Then set three values in `.env`:
 
 ```bash
 openssl rand -base64 32         # → SECRETS_ENCRYPTION_KEY (32-byte base64)
 openssl rand -hex 32            # → SESSION_SECRET (≥ 32 chars)
 ```
 
-Keep the dev-friendly defaults: `DEV_AUTH=true` (enables password-less login),
-`DEPLOY_DRIVER=mock` (no Docker daemon needed for previews), and a
-`GITHUB_WEBHOOK_SECRET` for the demo below. The `DATABASE_URL` / `REDIS_URL`
-defaults already match `pnpm infra:up`.
+…and set `GITHUB_WEBHOOK_SECRET` to any non-empty value (e.g.
+`dev-webhook-secret`) — it is the shared HMAC secret for the webhook demo in
+step 6. Keep the other dev-friendly defaults: `DEV_AUTH=true` (password-less
+login) and `DEPLOY_DRIVER=mock` (simulated previews, no Docker daemon needed).
+The `DATABASE_URL` / `REDIS_URL` defaults already match `pnpm infra:up` (they
+use `127.0.0.1` rather than `localhost` on purpose — on Windows, `localhost`
+resolves to IPv6 first and Prisma cannot reach the Docker-published port).
 
 ### 3. Migrate & seed the database
 
@@ -105,12 +132,12 @@ dashboard's dev-login (or `POST /api/v1/auth/dev-login` with
 
 ### 6. Demo: PR → live preview
 
-With the api + worker running and `GITHUB_WEBHOOK_SECRET` set, fire a signed
-GitHub `pull_request` webhook and watch the worker drive the new preview to
-`RUNNING` (mock driver):
+With the api + worker running, fire a signed GitHub `pull_request` webhook and
+watch the worker drive a brand-new preview to `RUNNING` (mock driver). Use the
+same value you put in `.env`:
 
 ```bash
-GITHUB_WEBHOOK_SECRET=<your value> node scripts/e2e-webhook.mjs
+GITHUB_WEBHOOK_SECRET=dev-webhook-secret node scripts/e2e-webhook.mjs
 ```
 
 It dev-logs-in, POSTs a signed `opened` webhook, then polls the previews API
@@ -119,9 +146,10 @@ appear (and stream logs) live in the dashboard.
 
 ## Health & API
 
-- `GET /healthz` — liveness (api)
+- `GET /healthz` — liveness (api; the worker serves its own on `:9090`)
 - `GET /readyz` — readiness; checks Postgres + Redis
-- `GET /docs` — OpenAPI / Swagger UI
+- `GET /metrics` — Prometheus metrics (api + worker; keep internal-only)
+- `GET /docs` — OpenAPI / Swagger UI (dev-only by default)
 
 ## Testing & checks
 

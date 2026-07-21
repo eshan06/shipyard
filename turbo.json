@@ -13,7 +13,11 @@
       "persistent": true
     },
     "lint": {
-      "dependsOn": ["^build"]
+      // ^build covers each package's declared deps; the explicit config#build
+      // is needed because every eslint.config.mjs (root included) imports the
+      // shared flat config from @shipyard/config's built dist/, and no package
+      // declares a runtime dependency on it.
+      "dependsOn": ["^build", "@shipyard/config#build"]
     },
     "typecheck": {
       "dependsOn": ["^build"],

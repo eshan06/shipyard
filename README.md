@@ -13,6 +13,8 @@ browser, not just read the diff.
 Think Vercel preview deployments, but built for teams that need databases,
 backend services, seeded data, and cleanup automation.
 
+![Shipyard overview — live snapshot of preview environments and recent activity](docs/media/overview.png)
+
 ## Features
 
 - 🚀 **Automatic previews** — a live environment per PR, updated on every push
@@ -23,6 +25,23 @@ backend services, seeded data, and cleanup automation.
 - 📊 **Dashboard** — active previews, deploy status, live logs, costs, reviewers,
   and failed builds at a glance
 - 💸 **Cost tracking** — per-preview usage rolled up to dollars, with budgets
+
+## Screenshots
+
+**Every preview environment across your projects** — one card per PR, status at
+a glance:
+
+![Previews — every live preview environment across your projects](docs/media/previews.png)
+
+**Preview detail** — services with health, live deployment logs streamed over
+SSE, and one-click redeploy / stop / destroy:
+
+![Preview detail — healthy services and live deployment logs](docs/media/preview-detail.png)
+
+**Deployments** — build-and-start runs with success rate, durations, and
+failures that need triage:
+
+![Deployments — build-and-start runs across all previews](docs/media/deployments.png)
 
 ## Engineering highlights
 

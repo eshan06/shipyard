@@ -46,6 +46,7 @@ and to flag manipulation attempts as security findings.
 | `REVIEWBOT_MAX_DIFF_BYTES` | `200000` | Total diff budget sent to the LLM |
 | `REVIEWBOT_MAX_FINDINGS` | `15` | Findings cap per review |
 | `REVIEWBOT_CONCURRENCY` | `2` | Parallel reviews |
+| `REVIEWBOT_DIFF_FIXTURE` | unset | Path to a unified-diff file reviewed INSTEAD of fetching from GitHub — the offline/demo mode (the seeded demo repos don't exist there). Try `fixtures/demo-pr.diff`. Leave unset in real deployments. |
 
 Lockfiles, minified bundles, sourcemaps, and binary assets are never sent to
 the LLM; a per-file patch cap plus the total budget keep prompts (and cost)
@@ -58,6 +59,11 @@ cd services/reviewbot
 python -m venv .venv && .venv/Scripts/pip install -e .[dev]   # or bin/ on POSIX
 REDIS_URL=redis://127.0.0.1:6379 REVIEWBOT_LLM=mock .venv/Scripts/python -m reviewbot
 ```
+
+For the full local demo (`node scripts/e2e-webhook.mjs` from the repo root),
+also set `REVIEWBOT_DIFF_FIXTURE=fixtures/demo-pr.diff` so the review runs
+against the bundled demo diff instead of calling GitHub for a repo that only
+exists in the seed data.
 
 Tests (no network, no Redis needed):
 

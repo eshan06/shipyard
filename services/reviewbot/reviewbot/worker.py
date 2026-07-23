@@ -31,6 +31,27 @@ logger = logging.getLogger("reviewbot")
 QUEUE_NAME = "review"
 
 
+def _read_fixture(path: str) -> str:
+    """Read a fixture diff, surfacing failures as the standard skip reason."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            return handle.read()
+    except OSError as error:
+        raise DiffUnavailableError(f"fixture diff unreadable: {error}") from error
+
+
+def result_summary(result: ReviewResult) -> dict[str, object]:
+    """JSON-safe job result stored by BullMQ (visible in queue tooling)."""
+    return {
+        "pr": f"{result.job.repo_full_name}#{result.job.pr_number}",
+        "headSha": result.job.head_sha,
+        "provider": result.provider,
+        "filesReviewed": result.files_reviewed,
+        "findings": len(result.findings),
+        "skipped": result.skipped_reason,
+    }
+
+
 def process_review(
     payload: object,
     provider: Provider,
@@ -48,7 +69,14 @@ def process_review(
             logger.warning("installation token failed (%s); trying anonymous diff fetch", error)
 
     try:
-        diff_text = fetch_diff(job.repo_full_name, job.pr_number, token)
+        if config.diff_fixture is not None:
+            # Offline/demo mode: review a fixture diff instead of calling
+            # GitHub (the seeded demo repos don't exist there). Exercises the
+            # exact same pipeline downstream of the fetch.
+            logger.info("using fixture diff %s (REVIEWBOT_DIFF_FIXTURE)", config.diff_fixture)
+            diff_text = _read_fixture(config.diff_fixture)
+        else:
+            diff_text = fetch_diff(job.repo_full_name, job.pr_number, token)
     except DiffUnavailableError as error:
         # Nothing to review (private repo without App creds, deleted PR, rate
         # limit). The review is advisory: record why and finish successfully —
@@ -113,9 +141,14 @@ async def run() -> None:
         try:
             # Providers are sync (httpx/SDK); run off the event loop so long
             # LLM calls don't stall queue heartbeats.
-            return await asyncio.to_thread(
+            result = await asyncio.to_thread(
                 process_review, job.data, provider, config, github
             )
+            # BullMQ stores the processor's return value as the job's result —
+            # it MUST be JSON-serializable. Returning the ReviewResult dataclass
+            # here made result storage throw AFTER the review's side effects
+            # ran, so every job "failed" and retried (3× analysis + comments).
+            return result_summary(result)
         except InvalidJobError as error:
             # A malformed payload will never succeed — log and swallow so
             # BullMQ doesn't retry it forever.

@@ -30,6 +30,12 @@ class Config:
     #: GitHub App credentials — enable private-repo diffs + PR comments.
     github_app_id: str | None
     github_app_private_key: str | None
+    #: Path to a unified-diff file used INSTEAD of fetching from GitHub.
+    #: The review-pipeline analogue of DEPLOY_DRIVER=mock's fabricated
+    #: preview URLs: lets local dev/demos exercise the full pipeline offline
+    #: (the seeded demo repos don't exist on real GitHub). Leave unset in
+    #: any deployed environment.
+    diff_fixture: str | None
     #: Hard cap on the diff text sent to the LLM (bytes, post-filtering).
     max_diff_bytes: int
     #: Cap on findings reported per review.
@@ -87,6 +93,7 @@ def load_config() -> Config:
         ollama_model=_env("REVIEWBOT_OLLAMA_MODEL", "llama3.1") or "",
         github_app_id=_env("GITHUB_APP_ID"),
         github_app_private_key=private_key,
+        diff_fixture=_env("REVIEWBOT_DIFF_FIXTURE"),
         max_diff_bytes=_int("REVIEWBOT_MAX_DIFF_BYTES", 200_000, 1_000, errors),
         max_findings=_int("REVIEWBOT_MAX_FINDINGS", 15, 1, errors),
         concurrency=_int("REVIEWBOT_CONCURRENCY", 2, 1, errors),

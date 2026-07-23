@@ -8,7 +8,7 @@ from reviewbot.analyzer import analyze
 from reviewbot.comment import MARKER, render_comment
 from reviewbot.config import Config
 from reviewbot.diff import apply_total_budget, is_ignored, split_diff
-from reviewbot.models import Finding, InvalidJobError, ReviewJob
+from reviewbot.models import FileDiff, Finding, InvalidJobError, ReviewJob
 from reviewbot.providers.mock import MockProvider
 
 SAMPLE_DIFF = """\
@@ -47,6 +47,7 @@ def make_config(**overrides) -> Config:
         ollama_model="llama3.1",
         github_app_id=None,
         github_app_private_key=None,
+        diff_fixture=None,
         max_diff_bytes=200_000,
         max_findings=15,
         concurrency=1,
@@ -224,3 +225,111 @@ class TestComment:
         result = analyze(make_job(), "", MockProvider(), make_config())
         body = render_comment(result)
         assert "Review skipped" in body
+
+
+# ── Fixture-diff mode (REVIEWBOT_DIFF_FIXTURE) ──────────────────────────────
+
+
+def test_fixture_diff_reviews_offline(tmp_path):
+    """With a fixture configured, the pipeline runs with zero network calls."""
+    from reviewbot.worker import process_review
+
+    fixture = tmp_path / "demo.diff"
+    fixture.write_text(SAMPLE_DIFF, encoding="utf-8")
+    config = make_config(diff_fixture=str(fixture))
+    provider = MockProvider()
+
+    result = process_review(
+        {
+            "pullRequestId": "pr_1",
+            "projectId": "proj_1",
+            "repoFullName": "acme/storefront",
+            "prNumber": 412,
+            "headSha": "a1b2c3d4e5f6",
+            "installationId": None,
+        },
+        provider,
+        config,
+        github=None,
+    )
+
+    assert result.skipped_reason is None
+    assert result.files_reviewed >= 1
+    assert any(f.category == "style" for f in result.findings)  # TODO marker
+
+
+def test_fixture_diff_missing_file_skips_gracefully(tmp_path):
+    """An unreadable fixture becomes a skip, not a crash/retry loop."""
+    from reviewbot.worker import process_review
+
+    config = make_config(diff_fixture=str(tmp_path / "nope.diff"))
+    provider = MockProvider()
+
+    result = process_review(
+        {
+            "pullRequestId": "pr_1",
+            "projectId": "proj_1",
+            "repoFullName": "acme/storefront",
+            "prNumber": 412,
+            "headSha": "a1b2c3d4e5f6",
+            "installationId": None,
+        },
+        provider,
+        config,
+        github=None,
+    )
+
+    assert result.skipped_reason is not None
+    assert "fixture diff unreadable" in result.skipped_reason
+
+
+# ── Regression: BullMQ result must be JSON-serializable ─────────────────────
+
+
+def test_result_summary_is_json_serializable(tmp_path):
+    """The processor's stored return value must survive json.dumps — returning
+    the raw ReviewResult dataclass made result storage fail AFTER side effects,
+    so every review job retried (3x analysis + PR comments)."""
+    import json
+
+    from reviewbot.worker import process_review, result_summary
+
+    fixture = tmp_path / "demo.diff"
+    fixture.write_text(SAMPLE_DIFF, encoding="utf-8")
+    config = make_config(diff_fixture=str(fixture))
+
+    result = process_review(
+        {
+            "pullRequestId": "pr_1",
+            "projectId": "proj_1",
+            "repoFullName": "acme/storefront",
+            "prNumber": 412,
+            "headSha": "a1b2c3d4e5f6",
+            "installationId": None,
+        },
+        MockProvider(),
+        config,
+        github=None,
+    )
+
+    summary = result_summary(result)
+    encoded = json.loads(json.dumps(summary))
+    assert encoded["pr"] == "acme/storefront#412"
+    assert encoded["findings"] == len(result.findings)
+    assert encoded["skipped"] is None
+
+
+class TestMockCredentialPattern:
+    def test_flags_string_literal_assignment(self):
+        files = [FileDiff(path="a.ts", patch='+const apiKey = "sk_live_abcdef";')]
+        assert any(
+            "credential" in f["title"] for f in MockProvider().review("r", 1, files)
+        )
+
+    def test_ignores_type_annotations_and_identifiers(self):
+        files = [
+            FileDiff(path="a.ts", patch="+clientSecret: string;\n+const secretRef = secretName;")
+        ]
+        assert not any(
+            "credential" in f["title"] for f in MockProvider().review("r", 1, files)
+        )

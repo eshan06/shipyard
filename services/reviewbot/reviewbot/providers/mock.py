@@ -14,7 +14,12 @@ from ..models import FileDiff
 
 _PATTERNS: list[tuple[re.Pattern[str], str, str, str]] = [
     (
-        re.compile(r"password|secret|api[_-]?key", re.IGNORECASE),
+        # An assignment of a string LITERAL to a credential-ish name — not any
+        # mention of "secret" (type annotations and identifiers are fine).
+        re.compile(
+            r"(password|secret|api[_-]?key|token)\w*\s*[:=]\s*[\"'][^\"']{4,}[\"']",
+            re.IGNORECASE,
+        ),
         "security",
         "high",
         "Possible hardcoded credential in changed code",

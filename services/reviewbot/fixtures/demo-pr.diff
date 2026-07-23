@@ -1,0 +1,57 @@
+diff --git a/src/payments/threeds.ts b/src/payments/threeds.ts
+new file mode 100644
+index 0000000..7c1a2f3
+--- /dev/null
++++ b/src/payments/threeds.ts
+@@ -0,0 +1,38 @@
++import { PaymentProvider } from "./provider";
++
++// TODO: move to env config before launch
++const STRIPE_API_KEY = "demo-hardcoded-key-not-real-0000";
++
++export interface ThreeDSChallenge {
++  clientSecret: string;
++  returnUrl: string;
++}
++
++export async function startChallenge(
++  provider: PaymentProvider,
++  paymentIntentId: string,
++): Promise<ThreeDSChallenge> {
++  console.log("starting 3DS challenge for", paymentIntentId);
++  const intent = await provider.confirmIntent(paymentIntentId, {
++    apiKey: STRIPE_API_KEY,
++    use3ds: true,
++  });
++  return {
++    clientSecret: intent.clientSecret,
++    returnUrl: `/payments/3ds/return?intent=${paymentIntentId}`,
++  };
++}
++
++export async function completeChallenge(
++  provider: PaymentProvider,
++  intentId: string,
++): Promise<boolean> {
++  try {
++    const result = await provider.captureIntent(intentId);
++    return result.status === "succeeded";
++  } catch {}
++  return false;
++}
+diff --git a/src/payments/webhooks.ts b/src/payments/webhooks.ts
+index 91b2c44..d3ee5a1 100644
+--- a/src/payments/webhooks.ts
++++ b/src/payments/webhooks.ts
+@@ -12,6 +12,9 @@ export async function handleProviderEvent(event: ProviderEvent): Promise<void> {
+   switch (event.type) {
+     case "payment_intent.succeeded":
+       await markPaid(event.data.intentId);
+       break;
++    case "payment_intent.requires_action":
++      await startChallengeFromEvent(event);
++      break;
+     default:
+       break;
+   }
+ }

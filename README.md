@@ -43,6 +43,21 @@ failures that need triage:
 
 ![Deployments — build-and-start runs across all previews](docs/media/deployments.png)
 
+**The `shipyard` CLI** (Go) — the same control plane from your terminal or CI,
+authenticated with scoped API tokens:
+
+![shipyard CLI — previews list and detail](docs/media/cli.png)
+
+**Live log tailing** — `shipyard logs` follows a preview's deployment over the
+same SSE stream the dashboard uses:
+
+![shipyard logs — live SSE tail of a deployment](docs/media/cli-logs.png)
+
+**The LLM review bot** (Python) — every PR webhook also enqueues an advisory
+code review; findings are posted back to the PR as a comment:
+
+![reviewbot — worker session and the PR comment it renders](docs/media/reviewbot.png)
+
 ## Engineering highlights
 
 - **Polyglot monorepo** — a TypeScript core (Next.js 15, Fastify, BullMQ,

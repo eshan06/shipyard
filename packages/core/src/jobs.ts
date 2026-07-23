@@ -27,6 +27,12 @@ export const QUEUE = {
   cleanup: "cleanup",
   /** Periodic resource-usage sampling → cost roll-ups. */
   cost: "cost",
+  /**
+   * LLM code review of a pull request's diff (consumed by the Python
+   * `services/reviewbot` worker — the queue payload is the cross-language
+   * contract, so keep {@link ReviewJobSchema} additive-only).
+   */
+  review: "review",
 } as const;
 
 /** Union of known queue names. */
@@ -63,6 +69,40 @@ export const DeployJobSchema = z.object({
 });
 /** Inferred type for {@link DeployJobSchema}. */
 export type DeployJob = z.infer<typeof DeployJobSchema>;
+
+/**
+ * Payload for a `review` job: run an LLM code review over a pull request's
+ * diff and post the findings back to the PR.
+ *
+ * CROSS-LANGUAGE CONTRACT: consumed by the Python reviewbot
+ * (`services/reviewbot`), which mirrors this shape in `models.py`. Changes
+ * must be additive (new optional fields only) and mirrored there.
+ */
+export const ReviewJobSchema = z.object({
+  /** The `PullRequest` row that triggered the review. */
+  pullRequestId: z.string().min(1),
+  /** The owning `Project` (repo + installation lookup). */
+  projectId: z.string().min(1),
+  /** Repo in `owner/name` form (denormalized so the bot needs no DB). */
+  repoFullName: z.string().min(1),
+  /** PR number in the provider's numbering. */
+  prNumber: z.number().int().positive(),
+  /** Head commit the review applies to (stale reviews are dropped). */
+  headSha: z.string().min(1),
+  /** GitHub App installation id for API auth; null → public-repo fallback. */
+  installationId: z.string().nullable().default(null),
+});
+/** Inferred type for {@link ReviewJobSchema}. */
+export type ReviewJob = z.infer<typeof ReviewJobSchema>;
+
+/**
+ * Stable deduplication key for a review of `(pullRequestId, headSha)` — a
+ * synchronize burst (rapid pushes) collapses to one review per head commit.
+ * Contains no `:` (BullMQ's internal key separator).
+ */
+export function reviewDedupId(pullRequestId: string, headSha: string): string {
+  return `review_${pullRequestId}_${headSha.slice(0, 12)}`;
+}
 
 /** Why a preview is being torn down. */
 export const DestroyReasonSchema = z.enum([

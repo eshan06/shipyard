@@ -17,11 +17,13 @@ import {
   DeployJobSchema,
   DestroyJobSchema,
   QUEUE,
+  ReviewJobSchema,
   destroyDedupId,
+  reviewDedupId,
 } from "@shipyard/core";
 
 import type { AppQueues } from "../types.js";
-import type { DeployJob, DestroyJob } from "@shipyard/core";
+import type { DeployJob, DestroyJob, ReviewJob } from "@shipyard/core";
 import type { FastifyInstance } from "fastify";
 
 /** Options for the queues plugin. */
@@ -51,10 +53,12 @@ async function queuesPlugin(
 
   const deploy = new Queue(QUEUE.deploy, { connection });
   const destroy = new Queue(QUEUE.destroy, { connection });
+  const review = new Queue(QUEUE.review, { connection });
 
   const queues: AppQueues = {
     deploy,
     destroy,
+    review,
     async enqueueDeploy(payload: DeployJob): Promise<string> {
       const data = DeployJobSchema.parse(payload);
       // Deterministic jobId so concurrent duplicates (double webhook/API call)
@@ -80,12 +84,22 @@ async function queuesPlugin(
       });
       return String(job.id);
     },
+    async enqueueReview(payload: ReviewJob): Promise<string> {
+      const data = ReviewJobSchema.parse(payload);
+      // One review per (PR, head commit): a rapid push burst collapses via the
+      // dedup key; a new head sha mints a new key and supersedes in the bot.
+      const job = await review.add(QUEUE.review, data, {
+        ...DEFAULT_JOB_OPTIONS,
+        deduplication: { id: reviewDedupId(data.pullRequestId, data.headSha) },
+      });
+      return String(job.id);
+    },
   };
 
   app.decorate("queues", queues);
 
   app.addHook("onClose", async () => {
-    await Promise.allSettled([deploy.close(), destroy.close()]);
+    await Promise.allSettled([deploy.close(), destroy.close(), review.close()]);
   });
 }
 

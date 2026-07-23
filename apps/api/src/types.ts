@@ -11,7 +11,7 @@
 
 import type { AppConfig } from "./config.js";
 import type { AnalyticsSink } from "./lib/analytics.js";
-import type { DeployJob, DestroyJob } from "@shipyard/core";
+import type { DeployJob, DestroyJob, ReviewJob } from "@shipyard/core";
 import type { PrismaClient } from "@shipyard/db";
 import type { Queue } from "bullmq";
 import type { preHandlerHookHandler } from "fastify";
@@ -51,6 +51,8 @@ export interface AppQueues {
   readonly deploy: Queue;
   /** The `destroy` queue (tear down a preview's resources). */
   readonly destroy: Queue;
+  /** The `review` queue (LLM PR review, consumed by services/reviewbot). */
+  readonly review: Queue;
   /**
    * Validate and enqueue a deploy job.
    * @param payload - The deploy job payload (validated with `DeployJobSchema`).
@@ -63,6 +65,13 @@ export interface AppQueues {
    * @returns The created job's id.
    */
   enqueueDestroy(payload: DestroyJob): Promise<string>;
+  /**
+   * Validate and enqueue an LLM code-review job (consumed by the Python
+   * reviewbot service). Deduplicated per (PR, head sha).
+   * @param payload - The review job payload (validated with `ReviewJobSchema`).
+   * @returns The created job's id.
+   */
+  enqueueReview(payload: ReviewJob): Promise<string>;
 }
 
 declare module "fastify" {

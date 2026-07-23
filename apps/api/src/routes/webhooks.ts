@@ -522,6 +522,21 @@ async function processPullRequest(
     trigger,
   });
 
+  // Advisory LLM code review of the PR diff (services/reviewbot). Best-effort:
+  // a review must never block or fail the deploy path.
+  try {
+    await app.queues.enqueueReview({
+      pullRequestId: pullRequest.id,
+      projectId: project.id,
+      repoFullName: project.repoFullName,
+      prNumber: pr.number,
+      headSha: pr.head.sha,
+      installationId: project.installationId ?? null,
+    });
+  } catch (err) {
+    app.log.warn({ err, pullRequestId: pullRequest.id }, "failed to enqueue PR review");
+  }
+
   await app.prisma.auditLog.create({
     data: {
       teamId: project.teamId,

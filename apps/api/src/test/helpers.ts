@@ -73,8 +73,10 @@ export function fakeQueues(): AppQueues {
   return {
     deploy: {} as AppQueues["deploy"],
     destroy: {} as AppQueues["destroy"],
+    review: {} as AppQueues["review"],
     enqueueDeploy: vi.fn(async () => "job-deploy-1"),
     enqueueDestroy: vi.fn(async () => "job-destroy-1"),
+    enqueueReview: vi.fn(async () => "job-review-1"),
   };
 }
 

@@ -58,7 +58,7 @@ function fakeRedis(): Redis {
 
 /** A recorded enqueue call (for asserting side effects when relevant). */
 interface RecordedEnqueue {
-  kind: "deploy" | "destroy";
+  kind: "deploy" | "destroy" | "review";
   payload: unknown;
 }
 
@@ -77,6 +77,11 @@ function recordingQueues(sink: RecordedEnqueue[]): AppQueues {
     enqueueDestroy: vi.fn(async (payload) => {
       sink.push({ kind: "destroy", payload });
       return "job-destroy-int";
+    }),
+    review: {} as AppQueues["review"],
+    enqueueReview: vi.fn(async (payload) => {
+      sink.push({ kind: "review", payload });
+      return "job-review-int";
     }),
   };
 }

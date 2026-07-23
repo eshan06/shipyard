@@ -76,6 +76,11 @@ function LoginInner(): React.JSX.Element {
     setSubmitting(true);
     try {
       const user = await api.devLogin(email.trim());
+      // Refresh the /me cache BEFORE navigating. This page's own useMe()
+      // cached a 401 when it mounted; navigating first would let AuthGuard
+      // read that stale error and bounce straight back here
+      // (shouldRetryOnError is off, so it never self-heals in time).
+      await me.mutate();
       // Buffered now; flushed once the authenticated app mounts after redirect.
       trackEvent(ANALYTICS_EVENTS.signedIn, { method: "dev" });
       toast.success(`Welcome back, ${user.name ?? user.email}`);

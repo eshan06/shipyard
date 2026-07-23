@@ -45,9 +45,17 @@ failures that need triage:
 
 ## Engineering highlights
 
-- **Typed monorepo** — TypeScript end-to-end (Next.js 15, Fastify, BullMQ,
-  Prisma), shared zod contracts + status state machines in `packages/core`,
-  orchestrated with Turborepo + pnpm workspaces.
+- **Polyglot monorepo** — a TypeScript core (Next.js 15, Fastify, BullMQ,
+  Prisma; shared zod contracts + status state machines in `packages/core`,
+  Turborepo + pnpm workspaces), a **Go** CLI speaking the same REST + SSE
+  surface as the dashboard, and a **Python** LLM review service consuming the
+  same job queue — the queue payload is a documented cross-language contract.
+- **LLM code review on every PR** — the webhook that deploys a preview also
+  enqueues an advisory review job: a Python worker fetches the diff, runs it
+  through a pluggable LLM seam (Claude with JSON-schema structured outputs,
+  local Ollama, or a deterministic mock), hardens the output (hallucinated
+  files dropped, dedupe, caps, prompt-injection resistance), and posts
+  findings back to the PR via the GitHub App.
 - **Real-time pipeline** — deploy progress fans out worker → Redis pub/sub →
   SSE → dashboard; log streaming with backfill + live tail; compare-and-swap
   status transitions so concurrent deploys/teardowns can't corrupt state.
@@ -62,15 +70,24 @@ failures that need triage:
   probes, structured logs, seeded demo data, idle-preview reaping, cost
   tracking, stuck-state reconciliation; Docker Compose + Kubernetes manifests
   and a release pipeline that builds + pushes images.
-- **Tested** — 200+ vitest tests including a real-database integration suite
-  that runs in CI against migrated + seeded Postgres.
+- **Tested** — 240+ tests across three languages (vitest, `go test`, pytest),
+  including a real-database integration suite that runs in CI against
+  migrated + seeded Postgres.
+- **Measured** — load-tested against the production build:
+  **~615 req/s sustained with p95 84 ms and zero errors** (100 concurrent
+  users, single Node process on a laptop-class host); realistic 50-user
+  browsing traffic sees p50 9 ms / p95 14 ms. Methodology + full numbers in
+  [`tools/loadtest/RESULTS.md`](./tools/loadtest/RESULTS.md).
 
 ## Monorepo layout
 
 ```
-apps/web        Next.js dashboard
-apps/api        Fastify control-plane API (REST + webhooks + SSE)
-apps/worker     BullMQ workers (deploy / cleanup / cost)
+apps/web        Next.js dashboard                                (TypeScript)
+apps/api        Fastify control-plane API (REST + webhooks + SSE)(TypeScript)
+apps/worker     BullMQ workers (deploy / cleanup / cost)         (TypeScript)
+services/reviewbot  LLM PR reviews (Claude / Ollama / mock)      (Python)
+cli/            `shipyard` terminal client (REST + SSE, tokens)  (Go)
+tools/loadtest  Locust load scenarios + measured results         (Python)
 packages/db     Prisma schema, client, migrations, seed
 packages/core   Shared zod schemas, types, crypto, status machines
 packages/deploy-engine  Docker orchestration for preview stacks

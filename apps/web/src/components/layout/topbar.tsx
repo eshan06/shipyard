@@ -41,7 +41,7 @@ function useOutside(
 }
 
 /**
- * The top bar: a terminal breadcrumb with a blinking caret, a ⌘K search/command
+ * The top bar: a terminal breadcrumb, a ⌘K search/command
  * bar, a truthful active-team indicator, a notifications panel, and a user menu
  * with a working "Sign out" action.
  */
@@ -86,7 +86,6 @@ export function Topbar(): React.JSX.Element {
       <div className="crumb">
         <span className="tilde">~/</span>
         <span className="seg">{crumbFor(pathname)}</span>
-        <span className="caret" />
       </div>
       <div className="topbar-right">
         <button className="kbar" onClick={cmd.open}>

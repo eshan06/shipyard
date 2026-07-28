@@ -152,8 +152,6 @@ body {
 .crumb { display: flex; align-items: center; gap: 8px; font-family: var(--mono); font-size: 13px; color: var(--tx-mid); }
 .crumb .tilde { color: var(--tx-faint); }
 .crumb .seg { color: var(--tx); }
-.crumb .caret { width: 8px; height: 15px; background: var(--acc); display: inline-block; margin-left: 3px; animation: blink 1.15s steps(1) infinite; border-radius: 1px; }
-@keyframes blink { 50% { opacity: 0; } }
 
 .topbar-right { margin-left: auto; display: flex; align-items: center; gap: 9px; }
 

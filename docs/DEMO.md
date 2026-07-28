@@ -65,30 +65,33 @@ grep -rl "preview.acme.dev" apps/web/.next/static   # must print nothing
 The demo is a standard Next.js app with no runtime dependencies, so any Node
 host works.
 
-**Build it from the repo root**, not from `apps/web`:
-
-```bash
-pnpm demo:build      # builds the workspace deps, then the demo bundle
-```
-
-This matters: `apps/web` imports `@shipyard/core`, whose package exports point
-at its compiled `dist/`. Building only `apps/web` on a fresh clone fails with
-`Module not found: Can't resolve '@shipyard/core/status'`. The root script
-builds the dependency chain first.
+`pnpm demo:build` works from the repo root **or** from `apps/web` — the script
+builds this app's workspace dependencies itself before running `next build`.
+That matters because `apps/web` imports `@shipyard/core`, whose package exports
+resolve to a compiled `dist/`; without it a fresh clone fails with
+`Module not found: Can't resolve '@shipyard/core/status'`.
 
 No environment variables are needed — `apps/web/scripts/demo-build.mjs` sets
 the four `NEXT_PUBLIC_*` values itself, because Next inlines them at build
 time and they must not depend on the host's runtime env.
 
-**Vercel** — in Project Settings:
+**Vercel** — set **Root Directory to `apps/web`** in Project Settings.
+
+This repo contains more than one deployable thing (the Next app and the Python
+reviewbot), so importing it at the repo root makes Vercel ask for a
+multi-service `vercel.json` and block the Deploy button. Scoping the project to
+`apps/web` is what you want anyway: the demo needs no other service.
 
 | Setting | Value |
 | --- | --- |
-| Root Directory | *(repo root — leave blank)* |
+| Root Directory | `apps/web` |
 | Framework Preset | Next.js |
-| Build Command | `pnpm demo:build` |
-| Output Directory | `apps/web/.next` |
-| Install Command | `pnpm install` |
+| Build Command | `pnpm demo:build` (override) |
+| Install Command | *(default)* |
+| Output Directory | *(default)* |
+
+Leave "Include files outside the root directory" **on** — pnpm installs the
+workspace from the repo root.
 
 **Docker / any Node host**: run `pnpm demo:build`, then serve with
 `pnpm demo:start` (or `next start` from `apps/web`). Nothing else needs to be

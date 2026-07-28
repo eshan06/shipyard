@@ -9,9 +9,33 @@
  * `NEXT_PUBLIC_*` values are inlined by `next build`, so they must be set
  * here (at build time) rather than in the runtime environment. This wrapper
  * exists so the same command works on Windows and POSIX shells.
+ *
+ * It also builds this app's workspace dependencies first, so the command is
+ * self-sufficient no matter where it is invoked from — including a host like
+ * Vercel whose Root Directory is `apps/web`. `@shipyard/core`'s package
+ * exports resolve to a compiled `dist/`, so without this a fresh clone fails
+ * with `Module not found: Can't resolve '@shipyard/core/status'`.
  */
 
 import { spawnSync } from "node:child_process";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+/** Repo root, from `apps/web/scripts/`. */
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+
+// Build this app's workspace dependencies. `@shipyard/core...` is core plus
+// its own dependencies; core is the only workspace package `apps/web` imports.
+// Filtering on it (rather than on web) keeps the app itself out of the graph,
+// which would otherwise run a second, discarded non-demo `next build`. If web
+// gains another workspace dependency, the build fails loudly with a
+// `Module not found` — it cannot silently ship a stale one.
+const deps = spawnSync("pnpm", ["--filter", "@shipyard/core...", "build"], {
+  stdio: "inherit",
+  cwd: REPO_ROOT,
+  shell: true,
+});
+if (deps.status !== 0) process.exit(deps.status ?? 1);
 
 /** Build-time public config for the demo bundle. */
 const env = {

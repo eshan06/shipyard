@@ -38,7 +38,9 @@ function isFailed(d: BuiltDeployment): boolean {
 /**
  * Derive terminal log lines from a build's real error summary. Lines that read
  * like an error are tinted red; everything else is dimmed. Falls back to a
- * single placeholder line when the API gave us no summary.
+ * status-appropriate placeholder when the API gave us no summary — this list
+ * also renders successful builds once "Show all builds" is on, so the fallback
+ * must not claim failure.
  */
 function logLines(d: BuiltDeployment): TermLine[] {
   const summary = d.build.errorSummary ?? d.errorSummary ?? "";
@@ -47,7 +49,16 @@ function logLines(d: BuiltDeployment): TermLine[] {
     .map((l) => l.replace(/\s+$/, ""))
     .filter((l) => l.length > 0);
   if (raw.length === 0) {
-    return [{ text: "Build failed — no error summary captured.", tone: "dim" }];
+    return [
+      isFailed(d)
+        ? { text: "Build failed — no error summary captured.", tone: "dim" }
+        : {
+            text: `Build ${d.build.status.toLowerCase()}${
+              d.build.imageTag ? ` — ${d.build.imageTag}` : ""
+            }.`,
+            tone: "dim",
+          },
+    ];
   }
   return raw.map((text) => {
     const looksError = /error|fail|cannot|exception|fatal|✖|✗/i.test(text);
@@ -75,11 +86,17 @@ function BuildCard({
   const { build } = deployment;
   const name = deployment.preview?.name ?? deployment.preview?.slug ?? "preview";
   const slug = deployment.preview?.slug ?? "";
+  // This card also renders SUCCEEDED builds when "Show all builds" is on, so
+  // every label below is derived from the build's real status rather than
+  // assuming failure.
+  const failed = isFailed(deployment);
   const errorText =
-    build.errorSummary ?? deployment.errorSummary ?? "Build failed";
+    build.errorSummary ??
+    deployment.errorSummary ??
+    (failed ? "Build failed" : (build.imageTag ?? "Build succeeded"));
   const when = relativeTime(build.finishedAt ?? deployment.finishedAt);
   const lines = logLines(deployment);
-  const exit = build.exitCode ?? 1;
+  const exit = build.exitCode ?? (failed ? 1 : 0);
 
   return (
     <div
@@ -159,15 +176,15 @@ function BuildCard({
           }}
         >
           <RefreshCw size={13} className={retrying ? "spin" : undefined} />
-          Retry
+          {failed ? "Retry" : "Redeploy"}
         </button>
       </div>
       {open ? (
         <div style={{ padding: "0 16px 16px" }}>
           <Term
             title={`build log · ${shortSha(deployment.commitSha)} · exit ${exit}`}
-            tag="FAILED"
-            tagTone="red"
+            tag={build.status}
+            tagTone={failed ? "red" : "green"}
             lines={lines}
           />
           <div style={{ display: "flex", gap: 9, marginTop: 12 }}>
@@ -177,7 +194,7 @@ function BuildCard({
               onClick={onRetry}
             >
               <RefreshCw size={13} />
-              Retry build
+              {failed ? "Retry build" : "Redeploy"}
             </button>
             <span className="btn btn-outline btn-sm" style={{ gap: 6 }}>
               <CopyBtn text={errorText} />

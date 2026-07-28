@@ -79,13 +79,15 @@ function DeploymentRow({
         <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
           <StatusBadge status={d.status} kind="deployment" />
           <span style={{ fontWeight: 600, fontSize: 13 }}>
-            {d.preview ? `PR #${d.preview.slug}` : "Deployment"}
+            {/* `name` already reads "PR #414 · image-cdn"; the slug is the
+                deployment target, shown dimmed beside it. */}
+            {d.preview?.name ?? "Deployment"}
           </span>
           <span
             className="mono"
             style={{ color: "var(--tx-dim)", fontSize: 12 }}
           >
-            {d.preview?.name ?? ""}
+            {d.preview?.slug ?? ""}
           </span>
         </div>
         <div className="meta" style={{ marginTop: 5 }}>

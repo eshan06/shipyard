@@ -34,7 +34,7 @@ watch the status walk `BUILDING → DEPLOYING → RUNNING` with logs streaming i
 
 ```bash
 pnpm install
-pnpm --filter @shipyard/web demo:build && pnpm --filter @shipyard/web demo:start
+pnpm demo:build && pnpm demo:start
 ```
 
 Then open <http://localhost:3100>. See [`docs/DEMO.md`](./docs/DEMO.md) for how

@@ -63,23 +63,36 @@ grep -rl "preview.acme.dev" apps/web/.next/static   # must print nothing
 ## Deploying it
 
 The demo is a standard Next.js app with no runtime dependencies, so any Node
-host works. Point the build command at `demo:build` instead of `build`.
+host works.
 
-**Vercel** (simplest):
+**Build it from the repo root**, not from `apps/web`:
 
 ```bash
-cd apps/web
-vercel deploy --prod --build-env NEXT_PUBLIC_DEMO=true \
-  --build-env NEXT_PUBLIC_DEPLOY_DRIVER=mock \
-  --build-env NEXT_PUBLIC_DEV_AUTH=false \
-  --build-env NEXT_PUBLIC_ANALYTICS_ENABLED=false
+pnpm demo:build      # builds the workspace deps, then the demo bundle
 ```
 
-…or set those four as build-time environment variables in the Vercel project
-settings and use `pnpm --filter @shipyard/web demo:build` as the build command.
+This matters: `apps/web` imports `@shipyard/core`, whose package exports point
+at its compiled `dist/`. Building only `apps/web` on a fresh clone fails with
+`Module not found: Can't resolve '@shipyard/core/status'`. The root script
+builds the dependency chain first.
 
-**Docker / any Node host**: run `demo:build`, then serve with `next start`.
-Nothing else needs to be provisioned — no `.env`, no database, no API.
+No environment variables are needed — `apps/web/scripts/demo-build.mjs` sets
+the four `NEXT_PUBLIC_*` values itself, because Next inlines them at build
+time and they must not depend on the host's runtime env.
+
+**Vercel** — in Project Settings:
+
+| Setting | Value |
+| --- | --- |
+| Root Directory | *(repo root — leave blank)* |
+| Framework Preset | Next.js |
+| Build Command | `pnpm demo:build` |
+| Output Directory | `apps/web/.next` |
+| Install Command | `pnpm install` |
+
+**Docker / any Node host**: run `pnpm demo:build`, then serve with
+`pnpm demo:start` (or `next start` from `apps/web`). Nothing else needs to be
+provisioned — no `.env`, no database, no API, no Docker daemon.
 
 ### Embedding in a marketing page
 

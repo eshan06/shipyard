@@ -9,6 +9,8 @@
   },
   "scripts": {
     "build": "turbo run build",
+    "demo:build": "turbo run build --filter=@shipyard/web^... && pnpm --filter @shipyard/web demo:build",
+    "demo:start": "pnpm --filter @shipyard/web demo:start",
     "dev": "turbo run dev",
     "lint": "turbo run lint",
     "test": "turbo run test",

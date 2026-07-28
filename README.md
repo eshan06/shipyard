@@ -26,6 +26,20 @@ backend services, seeded data, and cleanup automation.
   and failed builds at a glance
 - 💸 **Cost tracking** — per-preview usage rolled up to dollars, with budgets
 
+## Try it
+
+Run the **interactive demo** — the real dashboard against an in-memory dataset,
+with no API, database, or Docker required. Hit **Redeploy** on any preview and
+watch the status walk `BUILDING → DEPLOYING → RUNNING` with logs streaming in:
+
+```bash
+pnpm install
+pnpm --filter @shipyard/web demo:build && pnpm --filter @shipyard/web demo:start
+```
+
+Then open <http://localhost:3100>. See [`docs/DEMO.md`](./docs/DEMO.md) for how
+it works and how to deploy it.
+
 ## Screenshots
 
 **Every preview environment across your projects** — one card per PR, status at

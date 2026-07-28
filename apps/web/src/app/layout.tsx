@@ -1,5 +1,6 @@
 import { JetBrains_Mono, Space_Grotesk } from "next/font/google";
 
+import { DemoBadge } from "@/components/demo-mode";
 import { Providers } from "@/components/providers";
 
 import type { Metadata, Viewport } from "next";
@@ -65,6 +66,8 @@ export default function RootLayout({
     >
       <body>
         <Providers>{children}</Providers>
+        {/* Demo builds only: installs the in-memory backend + shows the badge. */}
+        <DemoBadge />
       </body>
     </html>
   );

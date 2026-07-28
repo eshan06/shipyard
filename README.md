@@ -1,8 +1,12 @@
 # ⚓ Shipyard
 
 [![CI](https://github.com/eshan06/shipyard/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/eshan06/shipyard/actions/workflows/ci.yml)
+[![Live demo](https://img.shields.io/badge/live%20demo-shipyard-6C5CE7)](https://shipyard-web-eight.vercel.app/)
 
 **Preview environments manager for full-stack teams.**
+
+**▶ [Try the live demo](https://shipyard-web-eight.vercel.app/)** — the real
+dashboard, no signup or setup.
 
 Every time a developer opens a pull request, Shipyard spins up a temporary, live
 version of the app — deployed branch, seeded database, backend services,
@@ -28,17 +32,21 @@ backend services, seeded data, and cleanup automation.
 
 ## Try it
 
-Run the **interactive demo** — the real dashboard against an in-memory dataset,
-with no API, database, or Docker required. Hit **Redeploy** on any preview and
-watch the status walk `BUILDING → DEPLOYING → RUNNING` with logs streaming in:
+**→ <https://shipyard-web-eight.vercel.app/>**
+
+The **interactive demo** is the real dashboard running against an in-memory
+dataset — no API, database, or Docker behind it. Hit **Redeploy** on any preview
+and watch the status walk `BUILDING → DEPLOYING → RUNNING` with logs streaming
+in over simulated SSE, exactly as the live system behaves.
+
+To run the same demo locally:
 
 ```bash
 pnpm install
-pnpm demo:build && pnpm demo:start
+pnpm demo:build && pnpm demo:start   # → http://localhost:3100
 ```
 
-Then open <http://localhost:3100>. See [`docs/DEMO.md`](./docs/DEMO.md) for how
-it works and how to deploy it.
+See [`docs/DEMO.md`](./docs/DEMO.md) for how it works and how to deploy it.
 
 ## Screenshots
 

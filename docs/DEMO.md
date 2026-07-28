@@ -1,5 +1,7 @@
 # Shipyard — interactive demo
 
+**Deployed at <https://shipyard-web-eight.vercel.app/>**
+
 A **backend-free build of the real dashboard**, for linking from a marketing
 site or portfolio. No API, database, Redis, or Docker: the app runs its actual
 production UI against an in-memory dataset.

@@ -1,0 +1,459 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Shipyard — a live environment for every pull request</title>
+<meta name="description" content="Shipyard gives every pull request a real, isolated full-stack environment — app, API, seeded database, cache — then tears it down automatically. Try the interactive demo." />
+
+<meta property="og:type" content="website" />
+<meta property="og:title" content="Shipyard — a live environment for every pull request" />
+<meta property="og:description" content="Disposable full-stack preview environments per PR, with live logs, cost tracking, and an LLM code reviewer." />
+<meta property="og:image" content="img/overview.png" />
+<meta name="twitter:card" content="summary_large_image" />
+
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚓</text></svg>" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<style>
+/* Design tokens lifted from the dashboard (apps/web/src/app/shipyard.css) so
+   the marketing page and the product read as one system. */
+:root{
+  --bg:#0a0b0f; --panel:#101218; --panel-2:#14161d; --inset:#0c0d12;
+  --line:rgba(255,255,255,.075); --line-strong:rgba(255,255,255,.14);
+  --tx:#e8eaf0; --tx-mid:#9aa1ad; --tx-dim:#6a7280; --tx-faint:#474d58;
+  --acc:#ff5c8a; --acc-bright:#ff7aa3; --acc-soft:rgba(255,92,138,.13); --acc-line:rgba(255,92,138,.32);
+  --green:#34d27b; --green-soft:rgba(52,210,123,.13); --green-line:rgba(52,210,123,.30);
+  --blue:#4c9dff; --blue-soft:rgba(76,157,255,.14); --blue-line:rgba(76,157,255,.32);
+  --amber:#f5b13d; --teal:#2dd4bf;
+  --radius:9px; --radius-lg:14px;
+  --sans:"Space Grotesk","Segoe UI",system-ui,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,monospace;
+  --shadow-lg:0 24px 60px -20px rgba(0,0,0,.7);
+  --maxw:1120px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--bg); color:var(--tx); font-family:var(--sans);
+  -webkit-font-smoothing:antialiased; line-height:1.6; overflow-x:hidden;
+}
+/* Faint grid, like the dashboard canvas. */
+body::before{
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:0;
+  background-image:linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),
+                   linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);
+  background-size:52px 52px;
+  mask-image:radial-gradient(ellipse 80% 60% at 50% 0%,#000 40%,transparent 100%);
+}
+.wrap{max-width:var(--maxw);margin:0 auto;padding:0 24px;position:relative;z-index:1}
+a{color:inherit;text-decoration:none}
+img{max-width:100%;display:block}
+
+/* ── nav ─────────────────────────────────────────────────────── */
+header{
+  position:sticky;top:0;z-index:50;backdrop-filter:blur(12px);
+  background:rgba(10,11,15,.82);border-bottom:1px solid var(--line);
+}
+.nav{display:flex;align-items:center;justify-content:space-between;height:62px}
+.brand{display:flex;align-items:center;gap:10px;font-weight:700;letter-spacing:-.01em}
+.brand .mark{
+  width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-size:16px;
+  background:linear-gradient(140deg,var(--acc),var(--acc-bright));box-shadow:0 4px 14px -4px var(--acc-line);
+}
+.brand small{display:block;font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--tx-dim);font-weight:500;text-transform:uppercase;margin-top:-3px}
+.nav-links{display:flex;align-items:center;gap:8px}
+.nav-links a{padding:8px 12px;border-radius:var(--radius);font-size:14px;color:var(--tx-mid);transition:color .15s,background .15s}
+.nav-links a:hover{color:var(--tx);background:var(--panel-2)}
+
+/* ── buttons ─────────────────────────────────────────────────── */
+.btn{
+  display:inline-flex;align-items:center;gap:8px;padding:11px 18px;border-radius:var(--radius);
+  font-size:14px;font-weight:600;border:1px solid transparent;transition:.15s;white-space:nowrap;
+}
+.btn-primary{background:var(--acc);color:#1a0410;box-shadow:0 6px 20px -8px var(--acc-line)}
+.btn-primary:hover{background:var(--acc-bright);transform:translateY(-1px)}
+.btn-ghost{border-color:var(--line-strong);color:var(--tx)}
+.btn-ghost:hover{background:var(--panel-2);border-color:var(--acc-line)}
+.btn-sm{padding:8px 14px;font-size:13px}
+
+/* ── hero ────────────────────────────────────────────────────── */
+.hero{padding:96px 0 56px;text-align:center}
+.eyebrow{
+  display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--acc-bright);
+  background:var(--acc-soft);border:1px solid var(--acc-line);padding:6px 13px;border-radius:99px;margin-bottom:24px;
+}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px var(--green-soft)}
+h1{
+  font-size:clamp(34px,5.6vw,60px);line-height:1.08;letter-spacing:-.03em;font-weight:700;
+  max-width:17ch;margin:0 auto 20px;
+}
+h1 .grad{background:linear-gradient(100deg,var(--acc) 10%,var(--acc-bright) 60%,var(--teal));-webkit-background-clip:text;background-clip:text;color:transparent}
+.lede{font-size:clamp(15.5px,1.9vw,18.5px);color:var(--tx-mid);max-width:64ch;margin:0 auto 32px}
+.cta-row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap}
+.cta-note{margin-top:16px;font-family:var(--mono);font-size:12px;color:var(--tx-faint)}
+
+/* ── browser frame ───────────────────────────────────────────── */
+.shot{
+  border:1px solid var(--line-strong);border-radius:var(--radius-lg);overflow:hidden;
+  background:var(--panel);box-shadow:var(--shadow-lg);
+}
+.shot-bar{
+  display:flex;align-items:center;gap:7px;padding:10px 14px;
+  background:var(--panel-2);border-bottom:1px solid var(--line);
+}
+.tl{width:10px;height:10px;border-radius:50%}
+.shot-url{
+  margin-left:10px;font-family:var(--mono);font-size:11px;color:var(--tx-dim);
+  background:var(--inset);border:1px solid var(--line);border-radius:6px;padding:3px 10px;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.hero-shot{margin-top:56px;position:relative}
+.hero-shot::after{
+  content:"";position:absolute;inset:auto 0 -1px 0;height:120px;
+  background:linear-gradient(to bottom,transparent,var(--bg));pointer-events:none;
+}
+
+/* ── metrics ─────────────────────────────────────────────────── */
+.metrics{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:var(--radius-lg);overflow:hidden;margin:72px 0;
+}
+.metric{background:var(--panel);padding:26px 20px;text-align:center}
+.metric b{display:block;font-family:var(--mono);font-size:clamp(21px,3vw,29px);font-weight:600;letter-spacing:-.02em;color:var(--tx)}
+.metric span{display:block;font-size:12.5px;color:var(--tx-dim);margin-top:5px}
+
+/* ── sections ────────────────────────────────────────────────── */
+section{padding:64px 0}
+.sec-head{max-width:60ch;margin-bottom:40px}
+.kicker{font-family:var(--mono);font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--acc);margin-bottom:12px}
+h2{font-size:clamp(25px,3.4vw,36px);letter-spacing:-.025em;line-height:1.18;font-weight:700;margin-bottom:14px}
+.sec-head p{color:var(--tx-mid);font-size:16px}
+
+.grid-2{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+.card{
+  background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-lg);
+  padding:26px;transition:border-color .18s,transform .18s;
+}
+.card:hover{border-color:var(--line-strong);transform:translateY(-2px)}
+.card .ico{
+  width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
+  font-size:18px;margin-bottom:16px;border:1px solid var(--line);
+}
+.card h3{font-size:17px;font-weight:600;letter-spacing:-.01em;margin-bottom:8px}
+.card p{color:var(--tx-mid);font-size:14.5px}
+.i-acc{background:var(--acc-soft);border-color:var(--acc-line)!important}
+.i-green{background:var(--green-soft);border-color:var(--green-line)!important}
+.i-blue{background:var(--blue-soft);border-color:var(--blue-line)!important}
+.i-amber{background:rgba(245,177,61,.14);border-color:rgba(245,177,61,.30)!important}
+
+/* ── flow ────────────────────────────────────────────────────── */
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+.step{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px;position:relative}
+.step .n{font-family:var(--mono);font-size:11px;color:var(--acc);margin-bottom:10px;letter-spacing:.08em}
+.step h4{font-size:14.5px;font-weight:600;margin-bottom:6px}
+.step p{font-size:13.5px;color:var(--tx-dim)}
+
+/* ── split feature ───────────────────────────────────────────── */
+.split{display:grid;grid-template-columns:.85fr 1.15fr;gap:44px;align-items:center}
+.split.rev{grid-template-columns:1.15fr .85fr}
+.split.rev .split-copy{order:2}
+.bullets{list-style:none;margin-top:20px;display:grid;gap:11px}
+.bullets li{display:flex;gap:11px;font-size:14.5px;color:var(--tx-mid);align-items:flex-start}
+.bullets .tick{color:var(--green);flex-shrink:0;margin-top:1px}
+
+/* ── stack ───────────────────────────────────────────────────── */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.chip{
+  font-family:var(--mono);font-size:12px;color:var(--tx-mid);
+  background:var(--panel-2);border:1px solid var(--line);border-radius:99px;padding:6px 13px;
+}
+
+/* ── final cta ───────────────────────────────────────────────── */
+.final{
+  text-align:center;border:1px solid var(--acc-line);border-radius:var(--radius-lg);
+  padding:60px 28px;margin:40px 0 72px;
+  background:radial-gradient(ellipse 70% 130% at 50% 0%,rgba(255,92,138,.10),transparent 70%),var(--panel);
+}
+.final h2{margin-bottom:12px}
+.final p{color:var(--tx-mid);max-width:52ch;margin:0 auto 26px}
+
+footer{border-top:1px solid var(--line);padding:32px 0 56px;color:var(--tx-faint);font-size:13.5px}
+.foot{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:center}
+.foot a{color:var(--tx-dim)}
+.foot a:hover{color:var(--tx)}
+
+@media (max-width:900px){
+  .metrics{grid-template-columns:repeat(2,1fr)}
+  .flow{grid-template-columns:repeat(2,1fr)}
+  .split,.split.rev{grid-template-columns:1fr;gap:28px}
+  .split.rev .split-copy{order:0}
+}
+@media (max-width:640px){
+  .hero{padding:64px 0 40px}
+  .grid-2{grid-template-columns:1fr}
+  .nav-links .hide-sm{display:none}
+  section{padding:48px 0}
+}
+@media (prefers-reduced-motion:reduce){
+  *{transition:none!important;scroll-behavior:auto!important}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="wrap nav">
+    <a class="brand" href="#top">
+      <span class="mark">⚓</span>
+      <span>Shipyard<small>preview envs</small></span>
+    </a>
+    <nav class="nav-links">
+      <a class="hide-sm" href="#how">How it works</a>
+      <a class="hide-sm" href="#review">AI review</a>
+      <a href="https://github.com/eshan06/shipyard">GitHub</a>
+      <a class="btn btn-primary btn-sm" href="__DEMO_URL__">Live demo</a>
+    </nav>
+  </div>
+</header>
+
+<main id="top">
+
+  <!-- hero -->
+  <div class="wrap hero">
+    <span class="eyebrow"><span class="dot"></span> Open source · Live demo, no signup</span>
+    <h1>Every pull request gets a <span class="grad">real environment</span>.</h1>
+    <p class="lede">
+      Shipyard spins up a live, isolated full-stack environment for each PR —
+      app, API, seeded database, cache — and tears it down automatically when the
+      PR closes. Reviewers click a link and test the actual change instead of
+      reading the diff.
+    </p>
+    <div class="cta-row">
+      <a class="btn btn-primary" href="__DEMO_URL__">Try the live demo →</a>
+      <a class="btn btn-ghost" href="https://github.com/eshan06/shipyard">View source</a>
+    </div>
+    <p class="cta-note">The demo is the real dashboard on simulated data. Nothing to install.</p>
+  </div>
+
+  <div class="wrap hero-shot">
+    <div class="shot">
+      <div class="shot-bar">
+        <span class="tl" style="background:#ff5f57"></span>
+        <span class="tl" style="background:#febc2e"></span>
+        <span class="tl" style="background:#28c840"></span>
+        <span class="shot-url">shipyard.acme.dev/overview</span>
+      </div>
+      <img src="img/overview.png" alt="Shipyard dashboard showing active preview environments, recent deployments and month-to-date cost" width="1600" height="950" />
+    </div>
+  </div>
+
+  <!-- metrics -->
+  <div class="wrap">
+    <div class="metrics">
+      <div class="metric"><b>615/s</b><span>sustained requests</span></div>
+      <div class="metric"><b>100 ms</b><span>p99 latency</span></div>
+      <div class="metric"><b>0</b><span>failures in 36k requests</span></div>
+      <div class="metric"><b>240+</b><span>tests across 3 languages</span></div>
+    </div>
+  </div>
+
+  <!-- features -->
+  <section class="wrap">
+    <div class="sec-head">
+      <p class="kicker">What it does</p>
+      <h2>Preview environments that include the whole stack</h2>
+      <p>Most preview tools deploy a frontend. Real review needs the services behind it — a database with believable data, a cache, background workers.</p>
+    </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="ico i-acc">🚀</div>
+        <h3>Automatic, per pull request</h3>
+        <p>A GitHub webhook opens an environment when the PR opens, redeploys it on every push, and destroys it on close. No one files a ticket for a staging slot.</p>
+      </div>
+      <div class="card">
+        <div class="ico i-blue">🗄️</div>
+        <h3>Full stack, seeded</h3>
+        <p>Web, API, Postgres, Redis and workers come up together, with seed templates loading believable data so the environment is worth clicking through.</p>
+      </div>
+      <div class="card">
+        <div class="ico i-green">🔐</div>
+        <h3>Built for untrusted code</h3>
+        <p>Previews run code from any contributor's branch, so containers drop Linux capabilities, get CPU/memory/PID quotas and a read-only root, on a per-preview network.</p>
+      </div>
+      <div class="card">
+        <div class="ico i-amber">💸</div>
+        <h3>Cleans up after itself</h3>
+        <p>Idle previews auto-stop, closed PRs are reaped on a TTL, and per-preview usage rolls up to dollars against a team budget — so the bill can't drift.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- how -->
+  <section class="wrap" id="how">
+    <div class="sec-head">
+      <p class="kicker">How it works</p>
+      <h2>Webhook in, live URL out</h2>
+    </div>
+    <div class="flow">
+      <div class="step">
+        <div class="n">01</div><h4>PR opened</h4>
+        <p>A signed GitHub webhook hits the control plane, which records the PR and queues a deploy.</p>
+      </div>
+      <div class="step">
+        <div class="n">02</div><h4>Stack planned</h4>
+        <p>The planner turns the repo's config into a container graph and resolves it in dependency order.</p>
+      </div>
+      <div class="step">
+        <div class="n">03</div><h4>Built &amp; started</h4>
+        <p>Workers build images and start containers, streaming logs to the dashboard as it happens.</p>
+      </div>
+      <div class="step">
+        <div class="n">04</div><h4>Routed &amp; reaped</h4>
+        <p>A reverse proxy maps <code style="font-family:var(--mono);font-size:12.5px;color:var(--acc-bright)">&lt;slug&gt;.preview.you.dev</code> to the stack — until it goes idle.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- live logs split -->
+  <section class="wrap">
+    <div class="split">
+      <div class="split-copy">
+        <p class="kicker">Real-time</p>
+        <h2>Watch a deploy happen</h2>
+        <p style="color:var(--tx-mid);font-size:15.5px">
+          Build and runtime logs stream from the worker to your browser over
+          server-sent events. Status changes land the moment they happen, so a
+          deploy is something you watch rather than something you refresh.
+        </p>
+        <ul class="bullets">
+          <li><span class="tick">✓</span> Live log tail with backfill, pause and search</li>
+          <li><span class="tick">✓</span> Per-service health as containers come up</li>
+          <li><span class="tick">✓</span> One-click redeploy, stop and destroy</li>
+        </ul>
+      </div>
+      <div class="shot">
+        <div class="shot-bar">
+          <span class="tl" style="background:#ff5f57"></span>
+          <span class="tl" style="background:#febc2e"></span>
+          <span class="tl" style="background:#28c840"></span>
+          <span class="shot-url">shipyard.acme.dev/previews/pr-412</span>
+        </div>
+        <img src="img/preview-detail.png" alt="Preview detail page showing four healthy services and a live streaming deployment log" width="1600" height="950" loading="lazy" />
+      </div>
+    </div>
+  </section>
+
+  <!-- review bot -->
+  <section class="wrap" id="review">
+    <div class="split rev">
+      <div class="shot">
+        <div class="shot-bar">
+          <span class="tl" style="background:#ff5f57"></span>
+          <span class="tl" style="background:#febc2e"></span>
+          <span class="tl" style="background:#28c840"></span>
+          <span class="shot-url">github.com/acme/storefront/pull/952</span>
+        </div>
+        <img src="img/reviewbot.png" alt="LLM review bot posting security, bug and style findings as a pull request comment" width="1600" height="1000" loading="lazy" />
+      </div>
+      <div class="split-copy">
+        <p class="kicker">AI code review</p>
+        <h2>A first-pass reviewer on every diff</h2>
+        <p style="color:var(--tx-mid);font-size:15.5px">
+          A Python service consumes the same PR events, analyses the diff for
+          security, correctness and style issues, and posts its findings back to
+          the pull request — so the humans start from a shorter list.
+        </p>
+        <ul class="bullets">
+          <li><span class="tick">✓</span> Pluggable backends — Claude, a local Ollama model, or offline</li>
+          <li><span class="tick">✓</span> Findings grounded in the diff, so it can't invent files</li>
+          <li><span class="tick">✓</span> Bounded prompts and capped findings to control spend</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- cli -->
+  <section class="wrap">
+    <div class="split">
+      <div class="split-copy">
+        <p class="kicker">Terminal</p>
+        <h2>Or stay in your shell</h2>
+        <p style="color:var(--tx-mid);font-size:15.5px">
+          A dependency-free Go binary talks to the same API as the dashboard,
+          with scoped tokens for CI. List previews, tail logs, trigger a
+          redeploy — without leaving the terminal.
+        </p>
+        <ul class="bullets">
+          <li><span class="tick">✓</span> Live log tailing over the same SSE streams</li>
+          <li><span class="tick">✓</span> <code style="font-family:var(--mono);font-size:13px">--json</code> output for scripting and CI</li>
+          <li><span class="tick">✓</span> Team-scoped API tokens with explicit scopes</li>
+        </ul>
+      </div>
+      <div class="shot">
+        <div class="shot-bar">
+          <span class="tl" style="background:#ff5f57"></span>
+          <span class="tl" style="background:#febc2e"></span>
+          <span class="tl" style="background:#28c840"></span>
+          <span class="shot-url">zsh — shipyard previews list</span>
+        </div>
+        <img src="img/cli.png" alt="Shipyard command-line client listing preview environments in a terminal" width="1400" height="900" loading="lazy" />
+      </div>
+    </div>
+  </section>
+
+  <!-- stack -->
+  <section class="wrap">
+    <div class="sec-head">
+      <p class="kicker">Under the hood</p>
+      <h2>Built like production infrastructure</h2>
+      <p>A typed monorepo with a real state machine, durable queues, and the operational surface you'd want if this were running for a team.</p>
+    </div>
+    <div class="grid-2" style="margin-bottom:22px">
+      <div class="card">
+        <h3>Correct under concurrency</h3>
+        <p>Every status change is a compare-and-swap against an explicit state machine, so racing deploys, teardowns and retries can't corrupt a preview's state.</p>
+      </div>
+      <div class="card">
+        <h3>Operable</h3>
+        <p>Prometheus metrics on the API and worker, health and readiness probes, structured logs, encrypted secrets at rest, and Compose plus Kubernetes manifests.</p>
+      </div>
+    </div>
+    <div class="chips">
+      <span class="chip">TypeScript</span><span class="chip">Next.js</span><span class="chip">Fastify</span>
+      <span class="chip">Go</span><span class="chip">Python</span><span class="chip">PostgreSQL</span>
+      <span class="chip">Redis</span><span class="chip">BullMQ</span><span class="chip">Prisma</span>
+      <span class="chip">Docker</span><span class="chip">Traefik</span><span class="chip">Kubernetes</span>
+    </div>
+  </section>
+
+  <!-- final -->
+  <div class="wrap">
+    <div class="final">
+      <h2>See it running</h2>
+      <p>The demo is the real dashboard backed by simulated data. Open a preview, hit redeploy, and watch the build stream in.</p>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="__DEMO_URL__">Try the live demo →</a>
+        <a class="btn btn-ghost" href="https://github.com/eshan06/shipyard">Read the code</a>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  <div class="wrap foot">
+    <span>Shipyard — preview environments for full-stack teams.</span>
+    <span>
+      <a href="https://github.com/eshan06/shipyard">GitHub</a> ·
+      <a href="__DEMO_URL__">Demo</a> ·
+      <a href="https://github.com/eshan06/shipyard/blob/main/docs/DEPLOYMENT.md">Docs</a>
+    </span>
+  </div>
+</footer>
+
+</body>
+</html>

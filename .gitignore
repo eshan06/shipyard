@@ -47,3 +47,6 @@ __pycache__/
 *.egg-info/
 .venv/
 .pytest_cache/
+
+# Marketing site build output
+site/dist/

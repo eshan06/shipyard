@@ -24,7 +24,8 @@
     "db:studio": "pnpm --filter @shipyard/db studio",
     "infra:up": "docker compose -f infra/docker/docker-compose.yml up -d",
     "infra:down": "docker compose -f infra/docker/docker-compose.yml down",
-    "infra:logs": "docker compose -f infra/docker/docker-compose.yml logs -f"
+    "infra:logs": "docker compose -f infra/docker/docker-compose.yml logs -f",
+    "site:build": "node site/build.mjs"
   },
   "devDependencies": {
     "@shipyard/config": "workspace:*",
